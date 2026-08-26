@@ -18,7 +18,6 @@ from __future__ import annotations
 import argparse
 import json
 from datetime import date
-from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -28,36 +27,15 @@ from app.envelope import (
     ASKS_FOR_MONEY,
     NO_HISTORY,
     ActionClass,
+    Channel,
     DebtorHistory,
     EnvelopeResult,
+    Language,
     Strategy,
+    Tone,
     evaluate_envelope,
 )
 from app.ledger import agent_view
-
-
-# The envelope hardens which strategy may run; these harden how it reaches the debtor.
-# Enumerated for the same reason Strategy and ActionClass are: a member the model invented
-# must fail validation rather than reach a dispatcher that has no branch for it.
-class Channel(StrEnum):
-    EMAIL = "email"
-    WHATSAPP = "whatsapp"
-    PORTAL = "portal"
-    NONE = "none"
-
-
-class Language(StrEnum):
-    EN = "en"
-    HI = "hi"
-    HINGLISH = "hinglish"
-
-
-class Tone(StrEnum):
-    COLLABORATIVE = "collaborative"
-    FIRM = "firm"
-    FORMAL = "formal"
-    CONCILIATORY = "conciliatory"
-    NEUTRAL = "neutral"
 
 
 class RejectedAction(BaseModel):
@@ -153,7 +131,9 @@ def decide_for_debtor(
     # silently switches itself off for direct callers is not a guard. Batches pass their
     # own prebuilt map so the log is folded once instead of once per debtor.
     if history is None:
-        history = contact_history.build(date.fromisoformat(as_of_date)).get(debtor_id, NO_HISTORY)
+        history = contact_history.build(
+            date.fromisoformat(as_of_date), only_debtor=debtor_id
+        ).get(debtor_id, NO_HISTORY)
 
     envelope: EnvelopeResult = evaluate_envelope(debtor, invoices, merchant, history=history)
 

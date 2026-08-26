@@ -40,6 +40,32 @@ class ActionClass(StrEnum):
     PROHIBITED = "PROHIBITED"
 
 
+# Delivery vocabulary. It lives here beside Strategy and ActionClass rather than in the
+# strategist because more than one module has to reason about it: the strategist emits a
+# channel, and contact_history has to recognise Channel.NONE to know a decision was a
+# decision NOT to make contact. Kept in the strategist, that second reader could only
+# restate the values as string literals, which is how "None" once slipped past "none".
+class Channel(StrEnum):
+    EMAIL = "email"
+    WHATSAPP = "whatsapp"
+    PORTAL = "portal"
+    NONE = "none"
+
+
+class Language(StrEnum):
+    EN = "en"
+    HI = "hi"
+    HINGLISH = "hinglish"
+
+
+class Tone(StrEnum):
+    COLLABORATIVE = "collaborative"
+    FIRM = "firm"
+    FORMAL = "formal"
+    CONCILIATORY = "conciliatory"
+    NEUTRAL = "neutral"
+
+
 ALL_STRATEGIES = frozenset(Strategy)
 
 # Strategies that put a number in front of the debtor. These are the ones the envelope
