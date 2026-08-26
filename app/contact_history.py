@@ -22,33 +22,30 @@ from datetime import date, datetime
 from typing import Any
 
 from app import audit
-from app.envelope import DebtorHistory, Strategy
-
-# Events that mean the agent put a message in front of this debtor. A decision with
-# channel "none" was a decision not to make contact, so it does not start a cooldown.
-SILENT_CHANNELS = frozenset({"", "none"})
+from app.envelope import Channel, DebtorHistory, Strategy
 
 
-def _event_date(event: dict[str, Any]) -> date | None:
-    raw = event.get("ts")
+def _parse_date(raw: Any) -> date | None:
     if not raw:
         return None
     try:
-        return datetime.fromisoformat(raw).date()
+        return datetime.fromisoformat(str(raw)).date()
     except ValueError:
-        # A malformed timestamp must not silently read as "never contacted", which would
-        # fail open on the cooldown. Drop the event and say so.
-        audit.record("contact_history.unparsable_timestamp", ts=raw, source_event=event.get("event"))
         return None
 
 
 def build(
-    as_of: date, events: list[dict[str, Any]] | None = None
+    as_of: date,
+    events: list[dict[str, Any]] | None = None,
+    *,
+    only_debtor: str | None = None,
 ) -> dict[str, DebtorHistory]:
     """Fold the audit log into per-debtor history as at `as_of`.
 
     `events` is injectable so the guardrails can be checked against a hand-built log
-    without writing files. Passing None reads the real one.
+    without writing files. Passing None reads the real one. `only_debtor` narrows the fold
+    to one debtor, for the single-decision path that would otherwise pay to fold the whole
+    book and then discard all but one entry.
     """
     if events is None:
         events = audit.read_all()
@@ -56,43 +53,63 @@ def build(
     last_contact: dict[str, date] = {}
     escalations: dict[str, int] = {}
     promises: dict[str, tuple[date, int | None]] = {}
+    undated = 0
+    unparsable_promise_dates: list[str] = []
 
     for event in events:
         debtor_id = event.get("debtor_id")
-        if not debtor_id:
+        if not debtor_id or (only_debtor is not None and debtor_id != only_debtor):
             continue
+
+        # One cutoff, applied before any branch. Every fold below is "as at `as_of`", and
+        # a run pinned to a fixed date must not be moved by an event stamped after it.
+        # An event we cannot place in time is dropped rather than counted, because
+        # counting it would silently move whichever fold it lands in.
+        stamped = _parse_date(event.get("ts"))
+        if stamped is None:
+            undated += 1
+            continue
+        if stamped > as_of:
+            continue
+
         name = event.get("event")
 
         if name == "decision.made":
-            if str(event.get("channel", "")) in SILENT_CHANNELS:
+            # A decision with channel NONE was a decision not to make contact, so it does
+            # not start a cooldown. A row with no channel at all is read the same way:
+            # those are legacy suppression records, and treating them as outreach would
+            # silence a debtor the agent never wrote to.
+            if (event.get("channel") or Channel.NONE) == Channel.NONE:
                 continue
-            stamped = _event_date(event)
-            if stamped is not None and stamped <= as_of:
-                previous = last_contact.get(debtor_id)
-                if previous is None or stamped > previous:
-                    last_contact[debtor_id] = stamped
+            previous = last_contact.get(debtor_id)
+            if previous is None or stamped > previous:
+                last_contact[debtor_id] = stamped
             if event.get("strategy") == Strategy.ESCALATE:
                 escalations[debtor_id] = escalations.get(debtor_id, 0) + 1
 
         elif name == "promise.made":
-            promised = event.get("promised_date")
-            if promised:
-                try:
-                    promises[debtor_id] = (
-                        date.fromisoformat(promised),
-                        event.get("promised_amount_paise"),
-                    )
-                except ValueError:
-                    audit.record(
-                        "contact_history.unparsable_promise_date",
-                        debtor_id=debtor_id,
-                        promised_date=promised,
-                    )
+            promised = _parse_date(event.get("promised_date"))
+            if promised is None:
+                unparsable_promise_dates.append(str(event.get("promised_date")))
+            else:
+                promises[debtor_id] = (promised, event.get("promised_amount_paise"))
 
         elif name == "settlement.confirmed":
             # Settlement closes the promise. This is the same suppression the webhook
             # already performs on the ladder, applied to the envelope's view of it.
             promises.pop(debtor_id, None)
+
+    # One summary per fold, not one row per bad row. The log is append-only and this
+    # function reads it on every decision, so recording per row would make a single corrupt
+    # entry grow the file every time it is read.
+    if undated:
+        audit.record("contact_history.undated_events_skipped", count=undated, as_of=as_of.isoformat())
+    if unparsable_promise_dates:
+        audit.record(
+            "contact_history.unparsable_promise_dates",
+            count=len(unparsable_promise_dates),
+            sample=unparsable_promise_dates[:3],
+        )
 
     histories: dict[str, DebtorHistory] = {}
     for debtor_id in set(last_contact) | set(escalations) | set(promises):
