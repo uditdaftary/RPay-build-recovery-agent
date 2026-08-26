@@ -1,4 +1,4 @@
-# Secrets — never commit. This file exists before .env by design.
+# Secrets. This file exists before .env by design, so a key can never be swept in.
 .env
 .env.local
 *.key
