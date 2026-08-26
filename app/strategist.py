@@ -17,13 +17,19 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 from app import audit, llm
-from app.envelope import ActionClass, EnvelopeResult, Strategy, evaluate_envelope
+from app.envelope import (
+    ASKS_FOR_MONEY,
+    ActionClass,
+    EnvelopeResult,
+    Strategy,
+    evaluate_envelope,
+)
+from app.ledger import agent_view
 
 
 class RejectedAction(BaseModel):
@@ -61,6 +67,8 @@ Core rules and principles:
    - If statutory escalation is prohibited (e.g. supplier is a trader or non-micro/small), do NOT threaten legal action or Section 15/16 interest.
 5. NO DARK PATTERNS: Do not manufacture false urgency, confirm-shame, or use manipulative copy. Maintain professional, commercial B2B tone.
 6. DOCUMENT REJECTED ACTIONS: You must populate `rejected_actions` with 1-2 strategies you considered but rejected, giving the specific reason why (proves AI judgment).
+7. PRE-AUTHORISED CONCESSIONS ONLY: `ask_amount_paise` must never fall below the `min_ask_paise` given in the envelope. That floor is the merchant's pre-authorised concession ceiling. You may not invent a discount, waive interest, or settle for less; anything lower is clamped and escalated for human review.
+8. AMOUNTS ARE COLLECTIBLE AMOUNTS: `total_collectible` already credits TDS withheld and off-rail settlement. Never ask for more than it, and never treat a TDS deduction as a shortfall.
 """
 
 
@@ -77,13 +85,22 @@ def decide_for_debtor(
     as_of_date: str = "2026-08-26",
 ) -> StrategistDecision:
     """Evaluate envelope and call the LLM to generate a recovery decision for a debtor."""
+    # Project before anything else reads the debtor. Callers hand us rows straight out of
+    # data/ledger.json, which still carry the hidden behaviour parameters, and this is the
+    # one chokepoint every decision passes through — so the projection belongs here rather
+    # than in each caller, where one forgotten call site would silently invalidate a run.
+    debtor = agent_view(debtor)
+
     envelope: EnvelopeResult = evaluate_envelope(debtor, invoices, merchant)
 
     debtor_id = debtor.get("debtor_id", "")
     debtor_name = debtor.get("name", "")
 
-    # Fast-path / hard-suppression: if only WAIT is permitted (e.g. permanent opt-out)
-    if envelope.permitted_strategies == [Strategy.WAIT]:
+    # Fast-path / hard-suppression. Reads the flag directly rather than inferring it from
+    # the envelope collapsing to [WAIT]: that coincidence holds only while no rule outside
+    # the opt-out block excludes HUMAN_HANDOFF, and the moment one does (a kill switch, a
+    # full review queue) a debtor who never opted out would be logged as one.
+    if debtor["opted_out"]:
         decision = StrategistDecision(
             debtor_id=debtor_id,
             debtor_name=debtor_name,
@@ -116,10 +133,10 @@ def decide_for_debtor(
         )
         return decision
 
-    # Build prompt payload
-    total_amount_paise = sum(i["amount_paise"] for i in invoices)
-    total_received_paise = sum(i.get("amount_received_paise", 0) for i in invoices)
-    total_overdue_paise = total_amount_paise - total_received_paise
+    # Build prompt payload. The envelope already netted off TDS credit and off-rail
+    # settlement; reuse its figure so the prompt, the concession floor and the money gates
+    # cannot drift apart.
+    collectible_paise = envelope.collectible_paise
 
     debtor_context = {
         "debtor_id": debtor_id,
@@ -132,7 +149,7 @@ def decide_for_debtor(
         "prior_disputes": debtor.get("prior_disputes", 0),
         "avg_days_late": debtor.get("avg_days_late", 0),
         "open_invoices_count": len(invoices),
-        "total_outstanding": _format_inr(total_overdue_paise),
+        "total_collectible": _format_inr(collectible_paise),
     }
 
     invoice_summaries = [
@@ -156,10 +173,19 @@ def decide_for_debtor(
         "msme_eligibility_reason": envelope.msme_eligibility_reason,
     }
 
+    # The pre-authorised band any ask must land in. Razorpay's principle is that agents
+    # pick from pre-authorised offers and cannot exceed merchant-defined ceilings, so both
+    # ends are bounds the code enforces below, not numbers the prompt merely mentions.
+    # Integer basis points throughout: this decides how much money the agent may forgo, and
+    # the rest of the codebase keeps paise exact.
+    concession_bps = int(round(envelope.max_concession_pct * 10_000))
+    min_ask_paise = collectible_paise - collectible_paise * concession_bps // 10_000
+
     envelope_summary = {
         "permitted_strategies": [s.value for s in envelope.permitted_strategies],
         "excluded_strategies": {s.value: r for s, r in envelope.excluded_reasons.items()},
         "max_concession_pct": envelope.max_concession_pct,
+        "min_ask_paise": min_ask_paise,
     }
 
     user_prompt = f"""Evaluate debtor for recovery action as of {as_of_date}:
@@ -195,6 +221,12 @@ Return your structured decision according to the schema. Ensure strategy is one 
     except Exception as exc:
         # If response parsing fails, fallback to safe strategy
         fallback_strategy = Strategy.WAIT if Strategy.WAIT in envelope.permitted_strategies else Strategy.HUMAN_HANDOFF
+        audit.record(
+            "strategist.parse_failed",
+            debtor_id=debtor_id,
+            error=str(exc),
+            fell_back_to=fallback_strategy,
+        )
         decision = StrategistDecision(
             debtor_id=debtor_id,
             debtor_name=debtor_name,
@@ -202,7 +234,7 @@ Return your structured decision according to the schema. Ensure strategy is one 
             channel="none",
             language=debtor.get("language", "en"),
             tone="neutral",
-            ask_amount_paise=total_overdue_paise,
+            ask_amount_paise=0,
             reasoning=f"LLM output parsing error ({exc}); fell back to {fallback_strategy.value}.",
             confidence=0.5,
             review_required=True,
@@ -225,9 +257,40 @@ Return your structured decision according to the schema. Ensure strategy is one 
         )
         decision.review_required = True
 
-    # Set action class and review_required flag from envelope
+    # Hard guardrail verification: a money ask must land inside the pre-authorised band.
+    # Below the floor is a concession the merchant never authorised. Above the collectible
+    # balance is a demand for money already paid — on a TDS invoice that is exactly the
+    # accuse-a-good-buyer failure the TDS_UNDERPAID state exists to catch. Gated on the
+    # strategy rather than on the sign of the ask, because 0 and None are the largest
+    # possible concession and must not slip through as "no ask at all".
+    if decision.strategy in ASKS_FOR_MONEY:
+        requested = decision.ask_amount_paise or 0
+        bounded = min(max(requested, min_ask_paise), collectible_paise)
+        if bounded != requested:
+            audit.record(
+                "envelope.ask_out_of_band",
+                debtor_id=debtor_id,
+                strategy=decision.strategy,
+                attempted_ask_paise=decision.ask_amount_paise,
+                min_ask_paise=min_ask_paise,
+                max_ask_paise=collectible_paise,
+                max_concession_pct=envelope.max_concession_pct,
+            )
+            decision.reasoning = (
+                f"Policy envelope clamped an ask of Rs {requested // 100:,} into the "
+                f"pre-authorised band Rs {min_ask_paise // 100:,} to "
+                f"Rs {collectible_paise // 100:,}. " + decision.reasoning
+            )
+            decision.ask_amount_paise = bounded
+            decision.review_required = True
+
+    # Set action class from the envelope. `review_required` is sticky: an interception or a
+    # clamp above already demanded human review, and recomputing it from the action class
+    # alone would clear that flag whenever the forced fallback happens to be AUTOMATABLE.
     decision.action_class = envelope.action_classes.get(decision.strategy, ActionClass.AUTOMATABLE)
-    decision.review_required = decision.action_class == ActionClass.REVIEW_REQUIRED
+    decision.review_required = (
+        decision.review_required or decision.action_class == ActionClass.REVIEW_REQUIRED
+    )
 
     audit.record(
         "decision.made",
@@ -259,8 +322,24 @@ def run_strategist_batch(
 
     for debtor in debtors:
         d_invoices = invoices_by_debtor.get(debtor["debtor_id"], [])
-        merchant = merchants_by_id.get(debtor["merchant_id"], ledger["merchants"][0])
         if d_invoices:
+            # Fail loud, but only where the merchant actually matters. Defaulting to the
+            # first merchant would silently hand the debtor whichever statutory eligibility
+            # that merchant happens to have — and MER-001 is the eligible one, so a bad
+            # merchant_id would quietly unlock the MSMED lever the trader merchant exists to
+            # be refused. A dormant debtor with no open invoices is skipped either way, so
+            # its stale reference must not abort the batch.
+            merchant = merchants_by_id.get(debtor["merchant_id"])
+            if merchant is None:
+                audit.record(
+                    "ledger.unknown_merchant",
+                    debtor_id=debtor["debtor_id"],
+                    merchant_id=debtor["merchant_id"],
+                )
+                raise KeyError(
+                    f"debtor {debtor['debtor_id']} references unknown merchant "
+                    f"{debtor['merchant_id']}; statutory eligibility cannot be determined"
+                )
             dec = decide_for_debtor(debtor, d_invoices, merchant, as_of_date=ledger.get("as_of", "2026-08-26"))
             decisions.append(dec)
 
