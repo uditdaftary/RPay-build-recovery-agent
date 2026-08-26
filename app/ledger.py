@@ -162,6 +162,7 @@ class Invoice:
 
     @property
     def outstanding_paise(self) -> int:
+        """Naive outstanding. Does not subtract TDS — the strategist must handle that."""
         return self.amount_paise - self.amount_received_paise
 
 
