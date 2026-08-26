@@ -2,27 +2,58 @@
 
 Run with: python test_decisions.py
 
+Everything here is deterministic and offline. The model call is stubbed where a decision
+path needs exercising, so this suite costs nothing, cannot flake on a 429, and gates
+honestly. The live batch against the real model chain is opt-in:
+
+    RUN_LIVE_LLM_CHECKS=1 python test_decisions.py
+
 Verifies:
-1. Hard Policy Envelope guardrails:
-   - Permanent suppression on opt-out
-   - Dispute blocking payment requests/escalation
-   - MSMED trader statutory refusal
-   - TDS underpaid allowing reconciliation
-   - VIP account relationship protection
-2. Baseline policy deterministic progression
-3. Comparative divergence: Agent vs. Baseline across the seeded ledger
-   (Milestone Gate: Agent and baseline produce different decisions across the batch)
+1. Hard Policy Envelope guardrails: opt-out suppression, dispute protection, MSMED trader
+   refusal, TDS reconciliation, VIP protection, unknown account value failing closed,
+   settled accounts blocking money asks, and multiple exclusion grounds surviving together.
+2. The agent view projection, so hidden behaviour parameters cannot reach a decision.
+3. Boundary enforcement: a prohibited strategy and a below-floor concession are both
+   intercepted AND leave the decision flagged for human review.
+4. Baseline policy progression, and the documented collapse of that ladder on the ledger.
 """
 
 from __future__ import annotations
 
 import json
-from pathlib import Path
+import os
+from contextlib import contextmanager
 
-from app.baseline import BaselineDecision, decide_baseline, run_baseline_batch
-from app.envelope import ActionClass, Strategy, evaluate_envelope
-from app.ledger import InvoiceState, Merchant, UdyamActivity
-from app.strategist import StrategistDecision, decide_for_debtor, run_strategist_batch
+from app import llm
+from app.baseline import decide_baseline, rung_for_days, run_baseline_batch
+from app.envelope import ASKS_FOR_MONEY, ActionClass, Strategy, evaluate_envelope
+from app.ledger import LEDGER_PATH, InvoiceState, Merchant, UdyamActivity, agent_view
+from app.strategist import decide_for_debtor, run_strategist_batch
+
+RUN_LIVE_LLM_CHECKS = os.getenv("RUN_LIVE_LLM_CHECKS") == "1"
+
+
+@contextmanager
+def stub_llm(payload: str):
+    """Serve a fixed model response, so decision paths are checkable offline and for free."""
+    original = llm.complete
+    llm.complete = lambda prompt, **kwargs: payload
+    try:
+        yield
+    finally:
+        llm.complete = original
+
+
+def _load_ledger() -> dict:
+    assert LEDGER_PATH.exists(), f"{LEDGER_PATH} must exist; run `python -m app.ledger --seed 42 --write`"
+    return json.loads(LEDGER_PATH.read_text(encoding="utf-8"))
+
+
+def _invoices_by_debtor(ledger: dict) -> dict[str, list[dict]]:
+    grouped: dict[str, list[dict]] = {}
+    for inv in ledger["invoices"]:
+        grouped.setdefault(inv["debtor_id"], []).append(inv)
+    return grouped
 
 
 def test_envelope_opt_out() -> None:
@@ -164,56 +195,346 @@ def test_baseline_policy() -> None:
     print("ok  baseline policy calendar progression")
 
 
-def test_batch_decision_divergence() -> None:
-    """Milestone Gate: Agent and baseline both run over at least 10 debtors and produce different decisions."""
-    ledger_path = Path("data/ledger.json")
-    assert ledger_path.exists(), "data/ledger.json must exist"
-    ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
-
-    # Evaluate 10 debtors
-    test_debtors_count = 10
-    subset_ledger = {
-        **ledger,
-        "debtors": ledger["debtors"][:test_debtors_count],
+def test_envelope_settled_account_blocks_money_asks() -> None:
+    """An account settled off-rail owes nothing, so no money ask may be permitted."""
+    debtor = {
+        "debtor_id": "DEB-PAID",
+        "name": "Already Paid Ltd",
+        "opted_out": False,
+        "trailing_12m_value_paise": 10_000_000_00,
     }
+    invoices = [
+        {
+            "invoice_id": "INV-P1",
+            "amount_paise": 1_000_000_00,
+            "amount_received_paise": 1_000_000_00,
+            "days_overdue": 60,
+            "state": InvoiceState.PAID_OFF_RAIL,
+            "off_rail_reference": "UTR511923447",
+        }
+    ]
+    merchant = Merchant("M1", "Test Merchant", True, "small", UdyamActivity.MANUFACTURING)
 
-    baseline_decisions = run_baseline_batch(subset_ledger)
-    assert len(baseline_decisions) == test_debtors_count
+    res = evaluate_envelope(debtor, invoices, merchant)
+    assert res.collectible_paise == 0
+    for money_ask in (
+        Strategy.REQUEST_PAYMENT,
+        Strategy.OBTAIN_PROMISE,
+        Strategy.NEGOTIATE_PARTIAL,
+        Strategy.ESCALATE,
+    ):
+        assert money_ask not in res.permitted_strategies, f"{money_ask} permitted on a settled account"
+    # Chasing the UTR is still exactly right.
+    assert Strategy.RECONCILE in res.permitted_strategies
 
-    agent_decisions = run_strategist_batch(subset_ledger, limit=test_debtors_count)
-    assert len(agent_decisions) == test_debtors_count
+    # A TDS deduction is a credit, not a shortfall: it must not inflate the collectible.
+    tds_invoice = [
+        {
+            "invoice_id": "INV-P2",
+            "amount_paise": 1_000_000_00,
+            "amount_received_paise": 900_000_00,
+            "tds_deducted_paise": 100_000_00,
+            "days_overdue": 20,
+            "state": InvoiceState.TDS_UNDERPAID,
+        }
+    ]
+    tds_res = evaluate_envelope(debtor, tds_invoice, merchant)
+    assert tds_res.collectible_paise == 0, "withheld TDS counted as collectible debt"
+    print("ok  envelope blocks money asks on settled and TDS-credited accounts")
 
-    # Compare baseline vs agent decisions
-    divergences = 0
-    reconciliation_count = 0
-    dispute_count = 0
-    wait_count = 0
 
-    print("\n--- Comparative Decision Batch Run (10 Debtors) ---")
-    print(f"{'Debtor Name':<28} {'Baseline Strategy':<18} {'Agent Strategy':<18} {'Divergent?':<10}")
-    print("-" * 78)
+def test_envelope_unknown_account_value_fails_closed() -> None:
+    """A debtor we cannot size is treated as worth protecting, not as worth nothing."""
+    debtor = {"debtor_id": "DEB-UNK", "name": "Unsized Corp", "opted_out": False}
+    invoices = [
+        {"invoice_id": "INV-U1", "amount_paise": 40_000_00, "days_overdue": 20, "state": "OVERDUE"}
+    ]
+    merchant = Merchant("M1", "Test Merchant", True, "small", UdyamActivity.MANUFACTURING)
 
+    res = evaluate_envelope(debtor, invoices, merchant)
+    assert Strategy.ESCALATE not in res.permitted_strategies, "unknown account value failed open"
+    assert "unknown" in res.excluded_reasons[Strategy.ESCALATE].lower()
+    print("ok  envelope fails closed on unknown account value")
+
+
+def test_envelope_preserves_multiple_exclusion_grounds() -> None:
+    """Two rules forbidding one action must both survive into the audit trail."""
+    debtor = {
+        "debtor_id": "DEB-BOTH",
+        "name": "Disputed And Trader",
+        "opted_out": False,
+        "trailing_12m_value_paise": 10_000_000_00,
+    }
+    invoices = [
+        {
+            "invoice_id": "INV-B1",
+            "amount_paise": 500_000_00,
+            "days_overdue": 60,
+            "state": InvoiceState.DISPUTED,
+            "dispute_reason": "Rate mismatch",
+        }
+    ]
+    trader = Merchant("M2", "Sagar Trading Company", True, "micro", UdyamActivity.TRADING)
+
+    reason = evaluate_envelope(debtor, invoices, trader).excluded_reasons[Strategy.ESCALATE]
+    assert "dispute" in reason.lower(), f"dispute ground lost from: {reason}"
+    assert "trader" in reason.lower(), f"statutory ground lost from: {reason}"
+    print("ok  envelope preserves every independent exclusion ground")
+
+
+def test_agent_view_projection() -> None:
+    """Hidden behaviour parameters must not survive the projection the agent is handed."""
+    raw = _load_ledger()["debtors"][0]
+    assert "behaviour" in raw, "ledger row must carry hidden params or this check proves nothing"
+
+    view = agent_view(raw)
+    assert "behaviour" not in view, "hidden parameters leaked into the agent view"
+    for hidden in ("pay_propensity", "promise_reliability", "habitual_days_late"):
+        assert hidden not in json.dumps(view), f"{hidden} leaked into the agent view"
+    assert view["debtor_id"] == raw["debtor_id"]
+    print("ok  agent view projection excludes hidden behaviour parameters")
+
+
+def _decision_payload(strategy: str, ask_amount_paise: int | None) -> str:
+    return json.dumps(
+        {
+            "debtor_id": "OVERWRITTEN",
+            "debtor_name": "OVERWRITTEN",
+            "strategy": strategy,
+            "channel": "email",
+            "language": "en",
+            "tone": "firm",
+            "ask_amount_paise": ask_amount_paise,
+            "reasoning": "Stubbed model response.",
+            "rejected_actions": [],
+            "confidence": 0.9,
+            "review_required": False,
+        }
+    )
+
+
+def _first_debtor_with_dispute(ledger: dict) -> tuple[dict, list[dict], dict]:
+    grouped = _invoices_by_debtor(ledger)
+    merchants = {m["merchant_id"]: m for m in ledger["merchants"]}
+    for debtor in ledger["debtors"]:
+        invoices = grouped.get(debtor["debtor_id"], [])
+        if not debtor["opted_out"] and any(i["state"] == InvoiceState.DISPUTED for i in invoices):
+            return debtor, invoices, merchants[debtor["merchant_id"]]
+    raise AssertionError("seeded ledger must contain a disputed, non-opted-out debtor")
+
+
+def test_intercepted_violation_requires_review() -> None:
+    """A prohibited strategy is intercepted AND stays flagged for a human."""
+    debtor, invoices, merchant = _first_debtor_with_dispute(_load_ledger())
+    envelope = evaluate_envelope(agent_view(debtor), invoices, merchant)
+    assert Strategy.REQUEST_PAYMENT not in envelope.permitted_strategies
+
+    with stub_llm(_decision_payload("REQUEST_PAYMENT", 1)):
+        decision = decide_for_debtor(debtor, invoices, merchant)
+
+    assert decision.strategy != Strategy.REQUEST_PAYMENT, "prohibited strategy survived"
+    assert decision.review_required, "intercepted violation was not flagged for review"
+
+    # Same for output the parser cannot read at all.
+    with stub_llm("not json at all"):
+        fallback = decide_for_debtor(debtor, invoices, merchant)
+    assert fallback.review_required, "parse failure was not flagged for review"
+    print("ok  intercepted violations and parse failures stay flagged for review")
+
+
+def test_ask_is_clamped_into_the_authorised_band() -> None:
+    """Every money ask lands inside [floor, collectible], whatever the model returns."""
+    ledger = _load_ledger()
+    grouped = _invoices_by_debtor(ledger)
+    merchants = {m["merchant_id"]: m for m in ledger["merchants"]}
+
+    chosen: tuple[dict, list[dict], dict, object] | None = None
+    for candidate in ledger["debtors"]:
+        if candidate["opted_out"]:
+            continue
+        invoices = grouped[candidate["debtor_id"]]
+        merchant = merchants[candidate["merchant_id"]]
+        envelope = evaluate_envelope(agent_view(candidate), invoices, merchant)
+        if Strategy.NEGOTIATE_PARTIAL in envelope.permitted_strategies:
+            chosen = (candidate, invoices, merchant, envelope)
+            break
+    assert chosen, "seeded ledger must permit NEGOTIATE_PARTIAL for some debtor"
+    debtor, invoices, merchant, envelope = chosen
+
+    collectible = envelope.collectible_paise
+    bps = int(round(envelope.max_concession_pct * 10_000))
+    floor = collectible - collectible * bps // 10_000
+    assert 0 < floor <= collectible
+
+    # Below the floor, at zero, and absent entirely are all the same offence: a concession
+    # the merchant never pre-authorised. Zero and None are the largest one available, so
+    # they must not escape a guard that catches a 99% discount.
+    for label, attempted in (("99% discount", 1_00), ("total write-off", 0), ("omitted", None)):
+        with stub_llm(_decision_payload("NEGOTIATE_PARTIAL", attempted)):
+            decision = decide_for_debtor(debtor, invoices, merchant)
+        assert decision.strategy == Strategy.NEGOTIATE_PARTIAL, (
+            f"{label}: strategy changed, so this no longer exercises the concession path"
+        )
+        assert decision.ask_amount_paise == floor, f"{label} was not clamped up to the floor"
+        assert decision.review_required, f"{label} was not flagged for review"
+
+    # Above the collectible balance is the mirror offence: demanding money already paid.
+    with stub_llm(_decision_payload("NEGOTIATE_PARTIAL", collectible * 10)):
+        over = decide_for_debtor(debtor, invoices, merchant)
+    assert over.strategy == Strategy.NEGOTIATE_PARTIAL
+    assert over.ask_amount_paise == collectible, "an over-ask was not capped at the collectible balance"
+    assert over.review_required, "over-ask was not flagged for review"
+
+    # An ask already inside the band is left exactly as the model chose it.
+    with stub_llm(_decision_payload("NEGOTIATE_PARTIAL", collectible)):
+        ok = decide_for_debtor(debtor, invoices, merchant)
+    assert ok.ask_amount_paise == collectible, "a compliant ask was altered"
+    print("ok  money asks are clamped into the pre-authorised band and escalated")
+
+
+def test_tds_withheld_cannot_be_demanded_back() -> None:
+    """The naive outstanding on a TDS invoice is an over-ask, and must be capped."""
+    ledger = _load_ledger()
+    grouped = _invoices_by_debtor(ledger)
+    merchants = {m["merchant_id"]: m for m in ledger["merchants"]}
+
+    for debtor in ledger["debtors"]:
+        invoices = grouped[debtor["debtor_id"]]
+        if debtor["opted_out"] or not any(i["state"] == InvoiceState.TDS_UNDERPAID for i in invoices):
+            continue
+        merchant = merchants[debtor["merchant_id"]]
+        envelope = evaluate_envelope(agent_view(debtor), invoices, merchant)
+        naive = sum(i["amount_paise"] for i in invoices) - sum(
+            i.get("amount_received_paise", 0) for i in invoices
+        )
+        if naive <= envelope.collectible_paise or not (ASKS_FOR_MONEY & set(envelope.permitted_strategies)):
+            continue
+        strategy = sorted(ASKS_FOR_MONEY & set(envelope.permitted_strategies))[0]
+
+        with stub_llm(_decision_payload(strategy.value, naive)):
+            decision = decide_for_debtor(debtor, invoices, merchant)
+
+        assert decision.ask_amount_paise == envelope.collectible_paise, (
+            f"{debtor['debtor_id']}: agent demanded the withheld TDS back "
+            f"({naive} vs collectible {envelope.collectible_paise})"
+        )
+        assert decision.review_required
+        print("ok  withheld TDS cannot be demanded back as a shortfall")
+        return
+
+    raise AssertionError("seeded ledger must contain a TDS debtor whose naive figure overstates the debt")
+
+
+def test_missing_optout_flag_is_refused() -> None:
+    """A debtor row with no suppression flag must never reach the agent."""
+    ledger = _load_ledger()
+    raw = dict(ledger["debtors"][0])
+    del raw["opted_out"]
+
+    try:
+        agent_view(raw)
+    except KeyError:
+        pass
+    else:
+        raise AssertionError("agent_view accepted a debtor with no opted_out field")
+
+    # And the envelope itself fails closed for any caller that bypasses the projection.
+    merchant = Merchant("M1", "Test Merchant", True, "small", UdyamActivity.MANUFACTURING)
+    invoices = [
+        {"invoice_id": "INV-M1", "amount_paise": 500_000_00, "days_overdue": 30, "state": "OVERDUE"}
+    ]
+    res = evaluate_envelope({"debtor_id": "DEB-NOFLAG", "name": "No Flag"}, invoices, merchant)
+    assert res.permitted_strategies == [Strategy.WAIT], "absent opt-out flag failed open"
+    print("ok  a debtor row with no opt-out flag is refused and fails closed")
+
+
+def test_optout_suppression_needs_no_model() -> None:
+    """The opt-out path must resolve to WAIT without consulting the model at all."""
+    ledger = _load_ledger()
+    grouped = _invoices_by_debtor(ledger)
+    merchants = {m["merchant_id"]: m for m in ledger["merchants"]}
+    opted_out = [d for d in ledger["debtors"] if d["opted_out"]]
+    assert opted_out, "the seeded ledger must contain an opted-out debtor"
+
+    for debtor in opted_out:
+        def _explode(prompt, **kwargs):
+            raise AssertionError("opted-out debtor must never reach the model")
+
+        original = llm.complete
+        llm.complete = _explode
+        try:
+            decision = decide_for_debtor(
+                debtor, grouped[debtor["debtor_id"]], merchants[debtor["merchant_id"]]
+            )
+        finally:
+            llm.complete = original
+
+        assert decision.strategy == Strategy.WAIT
+        assert decision.channel == "none"
+        assert "opted out" in decision.reasoning.lower()
+    print("ok  opt-out suppression resolves to WAIT with no model call")
+
+
+def test_baseline_ladder_and_its_collapse() -> None:
+    """The ladder spans its rungs per invoice, and provably collapses per debtor."""
+    ledger = _load_ledger()
+
+    # Per invoice the ladder is genuinely graded.
+    per_invoice = {rung_for_days(i["days_overdue"])[1] for i in ledger["invoices"]}
+    assert len(per_invoice) >= 3, f"ladder is degenerate even per invoice: {per_invoice}"
+
+    # Per debtor it is not, because the oldest invoice drives the rung. This is asserted
+    # rather than hidden: it is the reason a bare agent-vs-baseline difference count is
+    # not evidence of judgment, and it must fail loudly if the ledger ever changes shape.
+    decisions = run_baseline_batch(ledger)
+    rungs = {(d.strategy, d.tone) for d in decisions}
+    assert rungs == {(Strategy.ESCALATE, "formal")}, (
+        f"baseline no longer collapses to one rung ({rungs}); the divergence commentary in "
+        "the module docstring and the timeline needs re-deriving"
+    )
+    assert not any(d.strategy == Strategy.WAIT for d in decisions)
+    print(f"ok  baseline ladder graded per invoice, collapses to {rungs.pop()} per debtor")
+
+
+def live_agent_vs_baseline() -> None:
+    """Opt-in. Runs the real model chain over 10 debtors and prints a per-case comparison.
+
+    Deliberately prints rather than asserts a divergence count. Divergence measures
+    difference, not correctness: against a baseline that escalates every debtor, an agent
+    that always returned WAIT would score 100%. The number below is a description of one
+    non-deterministic run, not a gate, and must not be quoted as a result without saying
+    which models served it.
+    """
+    ledger = _load_ledger()
+    count = 10
+    subset = {**ledger, "debtors": ledger["debtors"][:count]}
+
+    baseline_decisions = run_baseline_batch(subset)
+    agent_decisions = run_strategist_batch(subset, limit=count)
+
+    print("\n--- Live agent vs baseline (non-deterministic, descriptive only) ---")
+    print(f"{'Debtor':<28} {'Baseline':<18} {'Agent':<18} {'Differs':<8} {'Review'}")
+    print("-" * 86)
     for base, agent in zip(baseline_decisions, agent_decisions):
-        is_divergent = base.strategy != agent.strategy
-        if is_divergent:
-            divergences += 1
-        if agent.strategy == Strategy.RECONCILE:
-            reconciliation_count += 1
-        if agent.strategy == Strategy.RESOLVE_DISPUTE:
-            dispute_count += 1
-        if agent.strategy == Strategy.WAIT:
-            wait_count += 1
+        differs = "yes" if base.strategy != agent.strategy else "no"
+        print(
+            f"{base.debtor_name:<28} {base.strategy:<18} {agent.strategy:<18} "
+            f"{differs:<8} {agent.review_required}"
+        )
 
-        div_marker = "YES (delta)" if is_divergent else "NO"
-        print(f"{base.debtor_name:<28} {base.strategy:<18} {agent.strategy:<18} {div_marker:<10}")
-
-    print("-" * 78)
-    print(f"Total evaluated: {test_debtors_count}")
-    print(f"Divergent decisions: {divergences} ({divergences/test_debtors_count:.0%})")
-    print(f"Reconciliations: {reconciliation_count}, Disputes: {dispute_count}, Restraint (WAIT): {wait_count}\n")
-
-    assert divergences >= 3, f"Agent and baseline must produce different decisions on at least 30% of debtors (got {divergences}/{test_debtors_count})"
-    print("ok  decision divergence gate PASSED")
+    opted_out_ids = {d["debtor_id"] for d in subset["debtors"] if d["opted_out"]}
+    restraint = [
+        d for d in agent_decisions if d.strategy == Strategy.WAIT and d.debtor_id not in opted_out_ids
+    ]
+    print(
+        f"\nWAIT decisions that are genuine restraint rather than opt-out suppression: "
+        f"{len(restraint)}"
+    )
+    if not restraint:
+        print(
+            "  NOTE: every WAIT this run came from the opt-out fast path. The claim that "
+            "restraint fires on reliable late payers is NOT evidenced by this run."
+        )
 
 
 if __name__ == "__main__":
@@ -222,6 +543,20 @@ if __name__ == "__main__":
     test_envelope_msmed_trader_refusal()
     test_envelope_tds_reconciliation()
     test_envelope_vip_protection()
+    test_envelope_settled_account_blocks_money_asks()
+    test_envelope_unknown_account_value_fails_closed()
+    test_envelope_preserves_multiple_exclusion_grounds()
+    test_agent_view_projection()
+    test_missing_optout_flag_is_refused()
+    test_intercepted_violation_requires_review()
+    test_ask_is_clamped_into_the_authorised_band()
+    test_tds_withheld_cannot_be_demanded_back()
+    test_optout_suppression_needs_no_model()
     test_baseline_policy()
-    test_batch_decision_divergence()
+    test_baseline_ladder_and_its_collapse()
     print("\nall decision tests passed")
+
+    if RUN_LIVE_LLM_CHECKS:
+        live_agent_vs_baseline()
+    else:
+        print("\nskipped the live model batch; set RUN_LIVE_LLM_CHECKS=1 to run it")
