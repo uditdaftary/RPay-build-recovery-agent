@@ -97,8 +97,11 @@ audit trail), that hidden behaviour parameters cannot reach a decision and a deb
 without an opt-out flag is refused outright, that a prohibited strategy and an ask outside
 the pre-authorised band are both intercepted **and** left flagged for human review — the
 band is bounded below by the concession floor and above by the collectible balance, so the
-agent can neither invent a discount nor demand withheld TDS back — and that the baseline
-policy progresses on calendar days overdue.
+agent can neither invent a discount nor demand withheld TDS back, and a strategy that asks
+for no money cannot carry an amount at all. Delivery is typed too: an unknown channel or a
+deadline that is prose rather than a date fails validation, and a deadline already past is
+dropped. Both decision paths write one `decision.made` shape, so the results page can read
+every row alike. The baseline policy is checked to progress on calendar days overdue.
 
 Runs offline with no model calls, so it costs nothing and cannot flake on a rate limit. The
 live batch against the real model chain is opt-in:
