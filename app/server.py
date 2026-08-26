@@ -28,7 +28,7 @@ app = FastAPI(title="B2B Receivables Recovery Agent")
 templates = Jinja2Templates(directory=str(PROJECT_ROOT / "app" / "templates"))
 
 # ponytail: two hardcoded invoices so the money path is runnable end to end today.
-# The seeded ledger replaces this dict and nothing else in this file.
+# Single-worker, single-process only. The seeded ledger replaces this.
 DEMO_INVOICES: dict[str, dict] = {
     "tok_demo1": {
         "invoice_id": "INV-4821",
