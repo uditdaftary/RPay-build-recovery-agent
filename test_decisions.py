@@ -23,10 +23,18 @@ from __future__ import annotations
 import json
 import os
 from contextlib import contextmanager
+from datetime import date
 
 from app import audit, llm
 from app.baseline import decide_baseline, rung_for_days, run_baseline_batch
-from app.envelope import ASKS_FOR_MONEY, ActionClass, Strategy, evaluate_envelope
+from app.contact_history import build as build_contact_history
+from app.envelope import (
+    ASKS_FOR_MONEY,
+    NO_HISTORY,
+    ActionClass,
+    Strategy,
+    evaluate_envelope,
+)
 from app.ledger import LEDGER_PATH, InvoiceState, Merchant, UdyamActivity, agent_view
 from app.strategist import decide_for_debtor, run_strategist_batch
 
@@ -163,6 +171,101 @@ def test_envelope_vip_protection() -> None:
     assert Strategy.ESCALATE not in res.permitted_strategies
     assert "exposure" in res.excluded_reasons[Strategy.ESCALATE].lower()
     print("ok  envelope VIP account relationship protection")
+
+
+def _plain_debtor_and_invoice() -> tuple[dict, list[dict], Merchant]:
+    debtor = {
+        "debtor_id": "DEB-HIST",
+        "name": "History Corp",
+        "opted_out": False,
+        "trailing_12m_value_paise": 10_000_00,
+    }
+    invoices = [
+        {"invoice_id": "INV-H1", "amount_paise": 500_000_00, "days_overdue": 60, "state": "OVERDUE"}
+    ]
+    return debtor, invoices, Merchant("M1", "Test Merchant", True, "small", UdyamActivity.MANUFACTURING)
+
+
+def _contact(debtor_id: str, ts: str, strategy: str = "REQUEST_PAYMENT", channel: str = "email") -> dict:
+    return {"ts": ts, "event": "decision.made", "debtor_id": debtor_id, "strategy": strategy, "channel": channel}
+
+
+def test_envelope_contact_cooldown() -> None:
+    """A debtor contacted inside the cooldown is not chased again."""
+    debtor, invoices, merchant = _plain_debtor_and_invoice()
+    as_of = date(2026, 8, 26)
+
+    recent = build_contact_history(as_of, [_contact("DEB-HIST", "2026-08-24T09:00:00+00:00")])
+    res = evaluate_envelope(debtor, invoices, merchant, history=recent["DEB-HIST"])
+    for money_ask in ASKS_FOR_MONEY:
+        assert money_ask not in res.permitted_strategies, f"{money_ask} survived the cooldown"
+    assert "cooldown" in res.excluded_reasons[Strategy.REQUEST_PAYMENT]
+    # Responding to a state the debtor is already in stays open.
+    assert Strategy.HUMAN_HANDOFF in res.permitted_strategies
+
+    lapsed = build_contact_history(as_of, [_contact("DEB-HIST", "2026-08-15T09:00:00+00:00")])
+    assert Strategy.REQUEST_PAYMENT in evaluate_envelope(
+        debtor, invoices, merchant, history=lapsed["DEB-HIST"]
+    ).permitted_strategies, "cooldown did not lapse after 11 days"
+
+    # A decision not to make contact must not start a cooldown.
+    silent = build_contact_history(
+        as_of, [_contact("DEB-HIST", "2026-08-25T09:00:00+00:00", strategy="WAIT", channel="none")]
+    )
+    assert silent.get("DEB-HIST", NO_HISTORY).days_since_last_contact is None
+    print("ok  envelope honours the contact-frequency cooldown")
+
+
+def test_envelope_max_intensity() -> None:
+    """Once the escalation ceiling is reached, further intensity is a human's call."""
+    debtor, invoices, merchant = _plain_debtor_and_invoice()
+    as_of = date(2026, 8, 26)
+    events = [
+        _contact("DEB-HIST", "2026-07-01T09:00:00+00:00", strategy="ESCALATE"),
+        _contact("DEB-HIST", "2026-07-20T09:00:00+00:00", strategy="ESCALATE"),
+    ]
+    history = build_contact_history(as_of, events)["DEB-HIST"]
+    assert history.escalations_sent == 2
+
+    res = evaluate_envelope(debtor, invoices, merchant, history=history)
+    assert Strategy.ESCALATE not in res.permitted_strategies
+    assert "ceiling" in res.excluded_reasons[Strategy.ESCALATE]
+    assert Strategy.HUMAN_HANDOFF in res.permitted_strategies, "no route left for a stuck account"
+    print("ok  envelope stops at the escalation ceiling")
+
+
+def test_envelope_active_promise() -> None:
+    """A promise not yet due shields the debtor; a broken one does not."""
+    debtor, invoices, merchant = _plain_debtor_and_invoice()
+    as_of = date(2026, 8, 26)
+    promise = {
+        "ts": "2026-08-20T09:00:00+00:00",
+        "event": "promise.made",
+        "debtor_id": "DEB-HIST",
+        "promised_date": "2026-09-10",
+        "promised_amount_paise": 500_000_00,
+    }
+
+    open_promise = build_contact_history(as_of, [promise])["DEB-HIST"]
+    res = evaluate_envelope(debtor, invoices, merchant, history=open_promise)
+    for money_ask in ASKS_FOR_MONEY:
+        assert money_ask not in res.permitted_strategies, f"{money_ask} chased inside an open promise"
+    assert "open promise" in res.excluded_reasons[Strategy.REQUEST_PAYMENT]
+
+    # Past its date and unsettled: broken, so chasing resumes.
+    broken = build_contact_history(as_of, [{**promise, "promised_date": "2026-08-01"}])["DEB-HIST"]
+    assert broken.active_promise_date is None
+    assert Strategy.REQUEST_PAYMENT in evaluate_envelope(
+        debtor, invoices, merchant, history=broken
+    ).permitted_strategies, "a broken promise still shielded the debtor"
+
+    # Settlement closes it, which is the webhook's suppression seen from the envelope.
+    settled = build_contact_history(
+        as_of,
+        [promise, {"ts": "2026-08-22T09:00:00+00:00", "event": "settlement.confirmed", "debtor_id": "DEB-HIST"}],
+    )
+    assert settled.get("DEB-HIST", NO_HISTORY).active_promise_date is None
+    print("ok  envelope holds off inside an open promise, resumes on a broken one")
 
 
 def test_baseline_policy() -> None:
@@ -349,14 +452,14 @@ def test_intercepted_violation_requires_review() -> None:
     assert Strategy.REQUEST_PAYMENT not in envelope.permitted_strategies
 
     with stub_llm(_decision_payload("REQUEST_PAYMENT", 1)):
-        decision = decide_for_debtor(debtor, invoices, merchant)
+        decision = decide_for_debtor(debtor, invoices, merchant, history=NO_HISTORY)
 
     assert decision.strategy != Strategy.REQUEST_PAYMENT, "prohibited strategy survived"
     assert decision.review_required, "intercepted violation was not flagged for review"
 
     # Same for output the parser cannot read at all.
     with stub_llm("not json at all"):
-        fallback = decide_for_debtor(debtor, invoices, merchant)
+        fallback = decide_for_debtor(debtor, invoices, merchant, history=NO_HISTORY)
     assert fallback.review_required, "parse failure was not flagged for review"
     print("ok  intercepted violations and parse failures stay flagged for review")
 
@@ -390,7 +493,7 @@ def test_ask_is_clamped_into_the_authorised_band() -> None:
     # they must not escape a guard that catches a 99% discount.
     for label, attempted in (("99% discount", 1_00), ("total write-off", 0), ("omitted", None)):
         with stub_llm(_decision_payload("NEGOTIATE_PARTIAL", attempted)):
-            decision = decide_for_debtor(debtor, invoices, merchant)
+            decision = decide_for_debtor(debtor, invoices, merchant, history=NO_HISTORY)
         assert decision.strategy == Strategy.NEGOTIATE_PARTIAL, (
             f"{label}: strategy changed, so this no longer exercises the concession path"
         )
@@ -399,14 +502,14 @@ def test_ask_is_clamped_into_the_authorised_band() -> None:
 
     # Above the collectible balance is the mirror offence: demanding money already paid.
     with stub_llm(_decision_payload("NEGOTIATE_PARTIAL", collectible * 10)):
-        over = decide_for_debtor(debtor, invoices, merchant)
+        over = decide_for_debtor(debtor, invoices, merchant, history=NO_HISTORY)
     assert over.strategy == Strategy.NEGOTIATE_PARTIAL
     assert over.ask_amount_paise == collectible, "an over-ask was not capped at the collectible balance"
     assert over.review_required, "over-ask was not flagged for review"
 
     # An ask already inside the band is left exactly as the model chose it.
     with stub_llm(_decision_payload("NEGOTIATE_PARTIAL", collectible)):
-        ok = decide_for_debtor(debtor, invoices, merchant)
+        ok = decide_for_debtor(debtor, invoices, merchant, history=NO_HISTORY)
     assert ok.ask_amount_paise == collectible, "a compliant ask was altered"
     print("ok  money asks are clamped into the pre-authorised band and escalated")
 
@@ -431,7 +534,7 @@ def test_tds_withheld_cannot_be_demanded_back() -> None:
         strategy = sorted(ASKS_FOR_MONEY & set(envelope.permitted_strategies))[0]
 
         with stub_llm(_decision_payload(strategy.value, naive)):
-            decision = decide_for_debtor(debtor, invoices, merchant)
+            decision = decide_for_debtor(debtor, invoices, merchant, history=NO_HISTORY)
 
         assert decision.ask_amount_paise == envelope.collectible_paise, (
             f"{debtor['debtor_id']}: agent demanded the withheld TDS back "
@@ -475,7 +578,7 @@ def test_non_money_strategy_carries_no_ask() -> None:
     assert Strategy.RECONCILE not in ASKS_FOR_MONEY
 
     with stub_llm(_decision_payload("RECONCILE", envelope.collectible_paise * 100 + 777)):
-        decision = decide_for_debtor(debtor, invoices, merchant)
+        decision = decide_for_debtor(debtor, invoices, merchant, history=NO_HISTORY)
 
     assert decision.strategy == Strategy.RECONCILE
     assert not decision.ask_amount_paise, "a non-money strategy kept an invented amount"
@@ -489,7 +592,7 @@ def test_unusable_deadline_and_channel_are_refused() -> None:
 
     past = _decision_payload("RECONCILE", None, deadline="2020-01-01")
     with stub_llm(past):
-        stale = decide_for_debtor(debtor, invoices, merchant)
+        stale = decide_for_debtor(debtor, invoices, merchant, history=NO_HISTORY)
     assert stale.deadline_requested is None, "a deadline in the past survived"
     assert stale.review_required, "past deadline was not flagged for review"
 
@@ -500,7 +603,7 @@ def test_unusable_deadline_and_channel_are_refused() -> None:
         _decision_payload("RECONCILE", None, channel="carrier-pigeon"),
     ):
         with stub_llm(bad):
-            refused = decide_for_debtor(debtor, invoices, merchant)
+            refused = decide_for_debtor(debtor, invoices, merchant, history=NO_HISTORY)
         assert refused.review_required, "unvalidated delivery field was accepted"
         assert "parsing error" in refused.reasoning
     print("ok  unusable deadlines and unknown channels are refused")
@@ -524,9 +627,14 @@ def test_decision_made_has_one_shape() -> None:
 
     audit.record = capture
     try:
-        decide_for_debtor(opted_out, grouped[opted_out["debtor_id"]], merchants[opted_out["merchant_id"]])
+        decide_for_debtor(
+            opted_out,
+            grouped[opted_out["debtor_id"]],
+            merchants[opted_out["merchant_id"]],
+            history=NO_HISTORY,
+        )
         with stub_llm(_decision_payload("RECONCILE", None)):
-            decide_for_debtor(ordinary, ord_invoices, ord_merchant)
+            decide_for_debtor(ordinary, ord_invoices, ord_merchant, history=NO_HISTORY)
     finally:
         audit.record = original
 
@@ -568,7 +676,10 @@ def test_optout_suppression_needs_no_model() -> None:
         llm.complete = _explode
         try:
             decision = decide_for_debtor(
-                debtor, grouped[debtor["debtor_id"]], merchants[debtor["merchant_id"]]
+                debtor,
+                grouped[debtor["debtor_id"]],
+                merchants[debtor["merchant_id"]],
+                history=NO_HISTORY,
             )
         finally:
             llm.complete = original
@@ -598,6 +709,69 @@ def test_baseline_ladder_and_its_collapse() -> None:
     )
     assert not any(d.strategy == Strategy.WAIT for d in decisions)
     print(f"ok  baseline ladder graded per invoice, collapses to {rungs.pop()} per debtor")
+
+
+def live_wait_restraint_check() -> None:
+    """Opt-in. Does WAIT fire as judgment on debtors who pay late but reliably?
+
+    The video's opening line is that the agent recommends no action on accounts that do not
+    need chasing. Every WAIT observed so far came from the opt-out fast path, which is
+    suppression rather than judgment, so this runs the cohort the claim is actually about.
+
+    Selection uses agent-visible fields only. Picking the cohort by the hidden behaviour
+    parameters would be choosing the answer and then reporting it as the agent's.
+    """
+    ledger = _load_ledger()
+    grouped = _invoices_by_debtor(ledger)
+    merchants = {m["merchant_id"]: m for m in ledger["merchants"]}
+    as_of = ledger.get("as_of", "2026-08-26")
+
+    ranked = []
+    for debtor in ledger["debtors"]:
+        if debtor["opted_out"] or not grouped.get(debtor["debtor_id"]):
+            continue
+        made = debtor["promises_made"]
+        if made < 4 or debtor["avg_days_late"] <= 0:
+            continue
+        kept_ratio = debtor["promises_kept"] / made
+        if kept_ratio >= 0.8:
+            ranked.append((kept_ratio, debtor))
+    ranked.sort(key=lambda pair: (-pair[0], pair[1]["debtor_id"]))
+    cohort = [debtor for _, debtor in ranked[:5]]
+
+    print("\n--- Live WAIT restraint check (pays late, keeps promises) ---")
+    if not cohort:
+        print("  no debtor in the seeded ledger matches the profile; the claim cannot be tested here")
+        return
+    print(f"{'Debtor':<28} {'Kept':<8} {'AvgLate':<9} {'Strategy':<18} {'Confidence'}")
+    print("-" * 78)
+
+    restraint = 0
+    for debtor in cohort:
+        decision = decide_for_debtor(
+            debtor,
+            grouped[debtor["debtor_id"]],
+            merchants[debtor["merchant_id"]],
+            as_of_date=as_of,
+            # A fresh run: no prior contact, so nothing but the debtor's own record and the
+            # invoice state can be driving the decision.
+            history=NO_HISTORY,
+        )
+        if decision.strategy == Strategy.WAIT:
+            restraint += 1
+        kept = f"{debtor['promises_kept']}/{debtor['promises_made']}"
+        print(
+            f"{debtor['name']:<28} {kept:<8} {debtor['avg_days_late']:<9} "
+            f"{decision.strategy:<18} {decision.confidence:.2f}"
+        )
+
+    print("-" * 78)
+    print(f"WAIT as restraint: {restraint} of {len(cohort)}")
+    if restraint == 0:
+        print(
+            "  NOT EVIDENCED: no debtor in this cohort drew WAIT. The opening line cannot be\n"
+            "  claimed on this run, and the timeline item stays open."
+        )
 
 
 def live_agent_vs_baseline() -> None:
@@ -673,11 +847,15 @@ if __name__ == "__main__":
     test_decision_made_has_one_shape()
     test_limit_of_zero_evaluates_nobody()
     test_optout_suppression_needs_no_model()
+    test_envelope_contact_cooldown()
+    test_envelope_max_intensity()
+    test_envelope_active_promise()
     test_baseline_policy()
     test_baseline_ladder_and_its_collapse()
     print("\nall decision tests passed")
 
     if RUN_LIVE_LLM_CHECKS:
+        live_wait_restraint_check()
         live_agent_vs_baseline()
     else:
         print("\nskipped the live model batch; set RUN_LIVE_LLM_CHECKS=1 to run it")
