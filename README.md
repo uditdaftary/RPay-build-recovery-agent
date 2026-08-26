@@ -20,7 +20,7 @@ with a full audit trail, measured against a fixed baseline policy on an identica
 | Append-only audit log | Working |
 | Seeded ledger, 70 invoices under 20 debtors | Working, reproducible from a seed |
 | Model failover across a model chain | Working |
-| Policy envelope, strategist, baseline runner | Working, with comparative decision checks |
+| Policy envelope, strategist, baseline runner | Working, checked offline. Three envelope rules (cooldown, max intensity, active promise) await the promise tracker |
 
 One gap worth naming: the card has not been pushed through Razorpay's checkout iframe
 end to end. Everything either side of it is verified, including signature verification
@@ -45,7 +45,7 @@ cp .env.example .env
 | `RAZORPAY_WEBHOOK_SECRET` | Webhooks only | Set by you when creating the webhook. **Not the key secret.** |
 | `GOOGLE_API_KEY` | The decision engine | https://aistudio.google.com/apikey |
 | `LLM_MODEL` | The decision engine | Defaults to `gemini-3.6-flash` |
-| `LLM_FALLBACK_MODELS` | Surviving a model outage | Defaults to `gemini-3.5-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite` |
+| `LLM_FALLBACK_MODELS` | Surviving a model outage | Defaults to `gemini-3.5-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-flash-latest`. The two `-lite` entries are unmeasured capacity headroom |
 | `LLM_TIMEOUT_MS` | Bounding a slow call | Defaults to `20000` |
 
 Note that `gemini-2.5-flash` appears in `models.list()` but returns 404 on
@@ -91,9 +91,26 @@ python test_decisions.py
 
 Checks that the hard policy envelope enforces deterministic guardrails (opt-out permanent
 suppression, active dispute protection, MSMED trader refusal, TDS reconciliation, VIP
-relationship protection), that the baseline policy progresses monotonically on calendar
-days overdue, and that the AI recovery strategist and baseline runner produce demonstrably
-divergent decisions across the seeded batch.
+relationship protection that fails closed on unknown account value, no money ask on an
+account already settled off-rail, and every independent exclusion ground surviving into the
+audit trail), that hidden behaviour parameters cannot reach a decision and a debtor row
+without an opt-out flag is refused outright, that a prohibited strategy and an ask outside
+the pre-authorised band are both intercepted **and** left flagged for human review — the
+band is bounded below by the concession floor and above by the collectible balance, so the
+agent can neither invent a discount nor demand withheld TDS back — and that the baseline
+policy progresses on calendar days overdue.
+
+Runs offline with no model calls, so it costs nothing and cannot flake on a rate limit. The
+live batch against the real model chain is opt-in:
+
+```bash
+RUN_LIVE_LLM_CHECKS=1 python test_decisions.py
+```
+
+It prints a per-case agent-versus-baseline table rather than asserting a divergence count.
+Divergence measures difference, not correctness: the baseline escalates all 20 debtors, so
+an agent that always answered `WAIT` would score 100%. The number that belongs in the pitch
+is the per-case adjudication, including the cases where the agent loses.
 
 ### Razorpay test instruments
 
