@@ -24,7 +24,7 @@ import json
 import os
 from contextlib import contextmanager
 
-from app import llm
+from app import audit, llm
 from app.baseline import decide_baseline, rung_for_days, run_baseline_batch
 from app.envelope import ASKS_FOR_MONEY, ActionClass, Strategy, evaluate_envelope
 from app.ledger import LEDGER_PATH, InvoiceState, Merchant, UdyamActivity, agent_view
@@ -295,22 +295,41 @@ def test_agent_view_projection() -> None:
     print("ok  agent view projection excludes hidden behaviour parameters")
 
 
-def _decision_payload(strategy: str, ask_amount_paise: int | None) -> str:
+def _decision_payload(
+    strategy: str,
+    ask_amount_paise: int | None,
+    *,
+    deadline: str | None = None,
+    channel: str = "email",
+) -> str:
     return json.dumps(
         {
             "debtor_id": "OVERWRITTEN",
             "debtor_name": "OVERWRITTEN",
             "strategy": strategy,
-            "channel": "email",
+            "channel": channel,
             "language": "en",
             "tone": "firm",
             "ask_amount_paise": ask_amount_paise,
+            "deadline_requested": deadline,
             "reasoning": "Stubbed model response.",
             "rejected_actions": [],
             "confidence": 0.9,
             "review_required": False,
         }
     )
+
+
+def _first_debtor_with_tds(ledger: dict) -> tuple[dict, list[dict], dict]:
+    grouped = _invoices_by_debtor(ledger)
+    merchants = {m["merchant_id"]: m for m in ledger["merchants"]}
+    for debtor in ledger["debtors"]:
+        invoices = grouped.get(debtor["debtor_id"], [])
+        if not debtor["opted_out"] and any(
+            i["state"] == InvoiceState.TDS_UNDERPAID for i in invoices
+        ):
+            return debtor, invoices, merchants[debtor["merchant_id"]]
+    raise AssertionError("seeded ledger must contain a TDS-underpaid, non-opted-out debtor")
 
 
 def _first_debtor_with_dispute(ledger: dict) -> tuple[dict, list[dict], dict]:
@@ -448,6 +467,91 @@ def test_missing_optout_flag_is_refused() -> None:
     print("ok  a debtor row with no opt-out flag is refused and fails closed")
 
 
+def test_non_money_strategy_carries_no_ask() -> None:
+    """RECONCILE asks for a document, not a payment, so an amount must not ride along."""
+    debtor, invoices, merchant = _first_debtor_with_tds(_load_ledger())
+    envelope = evaluate_envelope(agent_view(debtor), invoices, merchant)
+    assert Strategy.RECONCILE in envelope.permitted_strategies
+    assert Strategy.RECONCILE not in ASKS_FOR_MONEY
+
+    with stub_llm(_decision_payload("RECONCILE", envelope.collectible_paise * 100 + 777)):
+        decision = decide_for_debtor(debtor, invoices, merchant)
+
+    assert decision.strategy == Strategy.RECONCILE
+    assert not decision.ask_amount_paise, "a non-money strategy kept an invented amount"
+    assert decision.review_required, "stray ask on a non-money strategy was not flagged"
+    print("ok  a non-money strategy cannot carry an ask")
+
+
+def test_unusable_deadline_and_channel_are_refused() -> None:
+    """A deadline already past is dropped; a channel outside the enum fails validation."""
+    debtor, invoices, merchant = _first_debtor_with_tds(_load_ledger())
+
+    past = _decision_payload("RECONCILE", None, deadline="2020-01-01")
+    with stub_llm(past):
+        stale = decide_for_debtor(debtor, invoices, merchant)
+    assert stale.deadline_requested is None, "a deadline in the past survived"
+    assert stale.review_required, "past deadline was not flagged for review"
+
+    # Prose where a date belongs, and a channel nobody dispatches to, must both fail
+    # validation rather than reach a dispatcher — the parse-failure path catches them.
+    for bad in (
+        _decision_payload("RECONCILE", None, deadline="next Tuesday"),
+        _decision_payload("RECONCILE", None, channel="carrier-pigeon"),
+    ):
+        with stub_llm(bad):
+            refused = decide_for_debtor(debtor, invoices, merchant)
+        assert refused.review_required, "unvalidated delivery field was accepted"
+        assert "parsing error" in refused.reasoning
+    print("ok  unusable deadlines and unknown channels are refused")
+
+
+def test_decision_made_has_one_shape() -> None:
+    """Both decision paths write the same `decision.made` keys, for the metrics page."""
+    ledger = _load_ledger()
+    grouped = _invoices_by_debtor(ledger)
+    merchants = {m["merchant_id"]: m for m in ledger["merchants"]}
+    opted_out = next(d for d in ledger["debtors"] if d["opted_out"])
+    ordinary, ord_invoices, ord_merchant = _first_debtor_with_tds(ledger)
+
+    seen: list[set[str]] = []
+    original = audit.record
+
+    def capture(event: str, **fields: object) -> dict:
+        if event == "decision.made":
+            seen.append(set(fields))
+        return original(event, **fields)
+
+    audit.record = capture
+    try:
+        decide_for_debtor(opted_out, grouped[opted_out["debtor_id"]], merchants[opted_out["merchant_id"]])
+        with stub_llm(_decision_payload("RECONCILE", None)):
+            decide_for_debtor(ordinary, ord_invoices, ord_merchant)
+    finally:
+        audit.record = original
+
+    assert len(seen) == 2, f"expected one decision.made per path, saw {len(seen)}"
+    assert seen[0] == seen[1], f"suppression path differs by {seen[0] ^ seen[1]}"
+    for required in ("action_class", "channel", "tone", "rejected_actions", "debtor_name"):
+        assert required in seen[0], f"{required} missing from decision.made"
+    print("ok  decision.made carries one shape on both paths")
+
+
+def test_limit_of_zero_evaluates_nobody() -> None:
+    """limit=0 means nobody. Every debtor here would otherwise be a live model call."""
+
+    def _explode(prompt, **kwargs):
+        raise AssertionError("limit=0 must not reach the model")
+
+    original = llm.complete
+    llm.complete = _explode
+    try:
+        assert run_strategist_batch(_load_ledger(), limit=0) == []
+    finally:
+        llm.complete = original
+    print("ok  a limit of zero evaluates nobody")
+
+
 def test_optout_suppression_needs_no_model() -> None:
     """The opt-out path must resolve to WAIT without consulting the model at all."""
     ledger = _load_ledger()
@@ -512,10 +616,23 @@ def live_agent_vs_baseline() -> None:
     baseline_decisions = run_baseline_batch(subset)
     agent_decisions = run_strategist_batch(subset, limit=count)
 
+    # Paired on debtor_id, not by position. The two runners live in different modules and
+    # filter independently, so positional pairing would silently attribute one debtor's
+    # decision to another company's baseline the moment either filter changed.
+    baseline_by_id = {d.debtor_id: d for d in baseline_decisions}
+    agent_ids = {d.debtor_id for d in agent_decisions}
+    assert agent_ids == set(baseline_by_id), (
+        "agent and baseline batches covered different debtors "
+        f"(agent-only {sorted(agent_ids - set(baseline_by_id))}, "
+        f"baseline-only {sorted(set(baseline_by_id) - agent_ids)}); the comparison would "
+        "attribute decisions to the wrong companies"
+    )
+
     print("\n--- Live agent vs baseline (non-deterministic, descriptive only) ---")
     print(f"{'Debtor':<28} {'Baseline':<18} {'Agent':<18} {'Differs':<8} {'Review'}")
     print("-" * 86)
-    for base, agent in zip(baseline_decisions, agent_decisions):
+    for agent in agent_decisions:
+        base = baseline_by_id[agent.debtor_id]
         differs = "yes" if base.strategy != agent.strategy else "no"
         print(
             f"{base.debtor_name:<28} {base.strategy:<18} {agent.strategy:<18} "
@@ -551,6 +668,10 @@ if __name__ == "__main__":
     test_intercepted_violation_requires_review()
     test_ask_is_clamped_into_the_authorised_band()
     test_tds_withheld_cannot_be_demanded_back()
+    test_non_money_strategy_carries_no_ask()
+    test_unusable_deadline_and_channel_are_refused()
+    test_decision_made_has_one_shape()
+    test_limit_of_zero_evaluates_nobody()
     test_optout_suppression_needs_no_model()
     test_baseline_policy()
     test_baseline_ladder_and_its_collapse()
