@@ -40,7 +40,9 @@ LLM_MODEL = os.getenv("LLM_MODEL", "gemini-3.6-flash").strip()
 # decision arrives, not what it is. Tried in order on a retryable error.
 LLM_FALLBACK_MODELS = [
     name.strip()
-    for name in os.getenv("LLM_FALLBACK_MODELS", "gemini-3.5-flash,gemini-flash-latest").split(",")
+    for name in os.getenv(
+        "LLM_FALLBACK_MODELS", "gemini-3.5-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite"
+    ).split(",")
     if name.strip()
 ]
 
