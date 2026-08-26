@@ -106,6 +106,42 @@ class BehaviourParams:
     habitual_days_late: int
 
 
+AGENT_VISIBLE_FIELDS = (
+    "debtor_id",
+    "name",
+    "relationship_since",
+    "trailing_12m_value_paise",
+    "preferred_channel",
+    "language",
+    "opted_out",
+    "promises_made",
+    "promises_kept",
+    "prior_disputes",
+    "avg_days_late",
+)
+
+
+def agent_view(debtor: dict) -> dict:
+    """Project a debtor down to what the agent may see. Excludes `behaviour` by design.
+
+    A whitelist, not a blacklist, and the single source of truth for the projection. The
+    ledger is serialised with `asdict`, so a debtor loaded back from `data/ledger.json` is
+    a plain dict still carrying the hidden parameters — every path that hands a debtor to
+    the strategist or the envelope must come through here, or the reported recovery number
+    is something the author chose rather than something the agent earned.
+
+    `opted_out` is required rather than merely copied when present. Dropping it silently
+    would let the envelope's suppression check see nothing at all, and a projection is not
+    allowed to be the reason someone who opted out gets chased again.
+    """
+    if "opted_out" not in debtor:
+        raise KeyError(
+            f"debtor {debtor.get('debtor_id', '<unknown>')} has no `opted_out` field; "
+            "suppression cannot be evaluated and the row must not reach the agent"
+        )
+    return {field: debtor[field] for field in AGENT_VISIBLE_FIELDS if field in debtor}
+
+
 @dataclass
 class Debtor:
     debtor_id: str
@@ -124,19 +160,7 @@ class Debtor:
 
     def agent_view(self) -> dict:
         """The only projection the strategist may see. Excludes `behaviour` by design."""
-        return {
-            "debtor_id": self.debtor_id,
-            "name": self.name,
-            "relationship_since": self.relationship_since,
-            "trailing_12m_value_paise": self.trailing_12m_value_paise,
-            "preferred_channel": self.preferred_channel,
-            "language": self.language,
-            "opted_out": self.opted_out,
-            "promises_made": self.promises_made,
-            "promises_kept": self.promises_kept,
-            "prior_disputes": self.prior_disputes,
-            "avg_days_late": self.avg_days_late,
-        }
+        return agent_view(vars(self))
 
 
 @dataclass
