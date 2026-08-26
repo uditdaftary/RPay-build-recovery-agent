@@ -16,6 +16,7 @@ Built strictly to Razorpay's published agent design principles:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from enum import StrEnum
 from typing import Any
 
@@ -53,6 +54,25 @@ ASKS_FOR_MONEY = frozenset(
         Strategy.ESCALATE,
     }
 )
+
+
+@dataclass(frozen=True)
+class DebtorHistory:
+    """What the agent has already done to this debtor, and what it is waiting on.
+
+    Running state, not seeded state: the ledger is the starting position of the
+    experiment, so none of this belongs in it. `app/contact_history.py` derives these from
+    the append-only audit log. The default is the honest zero — a debtor never contacted,
+    with no promise outstanding — which is what a first run genuinely faces.
+    """
+
+    days_since_last_contact: int | None = None
+    escalations_sent: int = 0
+    active_promise_date: date | None = None
+    active_promise_amount_paise: int | None = None
+
+
+NO_HISTORY = DebtorHistory()
 
 
 @dataclass
@@ -93,6 +113,9 @@ def evaluate_envelope(
     *,
     max_concession_pct: float = 0.05,
     vip_exposure_ratio: float = 0.05,
+    history: DebtorHistory | None = None,
+    cooldown_days: int = 7,
+    max_escalations: int = 2,
 ) -> EnvelopeResult:
     """Evaluate deterministic guardrails for a debtor across their open invoices.
 
@@ -249,6 +272,52 @@ def evaluate_envelope(
             Strategy.NEGOTIATE_PARTIAL,
             "invoice balance too small for concession negotiation",
         )
+
+    # 8-10. WHAT THE AGENT HAS ALREADY DONE. These three read running state rather than
+    # invoice state, so they only bite once the agent has a history with this debtor.
+    # All of them gate the money asks and leave RECONCILE, RESOLVE_DISPUTE and
+    # HUMAN_HANDOFF open: those respond to a state the debtor is already in, rather than
+    # chasing, and silencing them would trap an account that needs exactly that response.
+    past = history or NO_HISTORY
+
+    # 8. CONTACT-FREQUENCY COOLDOWN
+    if past.days_since_last_contact is not None and past.days_since_last_contact < cooldown_days:
+        for money_ask in sorted(ASKS_FOR_MONEY):
+            _exclude(
+                excluded,
+                action_classes,
+                money_ask,
+                f"last contacted {past.days_since_last_contact} day(s) ago; the "
+                f"{cooldown_days}-day contact cooldown has not elapsed",
+            )
+
+    # 9. MAX INTENSITY REACHED
+    if past.escalations_sent >= max_escalations:
+        _exclude(
+            excluded,
+            action_classes,
+            Strategy.ESCALATE,
+            f"{past.escalations_sent} escalations already sent, which is the ceiling of "
+            f"{max_escalations}; further intensity is a human's decision, not the agent's",
+        )
+
+    # 10. ACTIVE PROMISE RUNNING
+    # A debtor who committed to a date has not broken anything yet. Chasing inside their
+    # own promise is the fastest way to lose the relationship the promise just bought.
+    if past.active_promise_date is not None:
+        committed = (
+            f" for {past.active_promise_amount_paise // 100:,} rupees"
+            if past.active_promise_amount_paise
+            else ""
+        )
+        for money_ask in sorted(ASKS_FOR_MONEY):
+            _exclude(
+                excluded,
+                action_classes,
+                money_ask,
+                f"debtor has an open promise to pay{committed} by "
+                f"{past.active_promise_date.isoformat()}, which has not fallen due",
+            )
 
     # Determine final permitted strategies preserving ordering. WAIT is never excluded by
     # any rule above, so this is never empty.
