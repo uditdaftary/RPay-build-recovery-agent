@@ -23,10 +23,12 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from app import audit, llm
+from app import audit, contact_history, llm
 from app.envelope import (
     ASKS_FOR_MONEY,
+    NO_HISTORY,
     ActionClass,
+    DebtorHistory,
     EnvelopeResult,
     Strategy,
     evaluate_envelope,
@@ -134,6 +136,7 @@ def decide_for_debtor(
     merchant: dict[str, Any],
     *,
     as_of_date: str = "2026-08-26",
+    history: DebtorHistory | None = None,
 ) -> StrategistDecision:
     """Evaluate envelope and call the LLM to generate a recovery decision for a debtor."""
     # Project before anything else reads the debtor. Callers hand us rows straight out of
@@ -142,10 +145,17 @@ def decide_for_debtor(
     # than in each caller, where one forgotten call site would silently invalidate a run.
     debtor = agent_view(debtor)
 
-    envelope: EnvelopeResult = evaluate_envelope(debtor, invoices, merchant)
-
     debtor_id = debtor.get("debtor_id", "")
     debtor_name = debtor.get("name", "")
+
+    # Cooldown, intensity and open-promise state gate the money asks, so an unsupplied
+    # history is derived here rather than defaulting to "no history" — a guard that
+    # silently switches itself off for direct callers is not a guard. Batches pass their
+    # own prebuilt map so the log is folded once instead of once per debtor.
+    if history is None:
+        history = contact_history.build(date.fromisoformat(as_of_date)).get(debtor_id, NO_HISTORY)
+
+    envelope: EnvelopeResult = evaluate_envelope(debtor, invoices, merchant, history=history)
 
     # Fast-path / hard-suppression. Reads the flag directly rather than inferring it from
     # the envelope collapsing to [WAIT]: that coincidence holds only while no rule outside
@@ -389,6 +399,10 @@ def run_strategist_batch(
     debtors = ledger["debtors"] if limit is None else ledger["debtors"][:limit]
     decisions: list[StrategistDecision] = []
 
+    as_of_date = ledger.get("as_of", "2026-08-26")
+    # Folded once for the whole batch rather than re-read per debtor.
+    histories = contact_history.build(date.fromisoformat(as_of_date))
+
     for debtor in debtors:
         d_invoices = invoices_by_debtor.get(debtor["debtor_id"], [])
         if d_invoices:
@@ -409,7 +423,13 @@ def run_strategist_batch(
                     f"debtor {debtor['debtor_id']} references unknown merchant "
                     f"{debtor['merchant_id']}; statutory eligibility cannot be determined"
                 )
-            dec = decide_for_debtor(debtor, d_invoices, merchant, as_of_date=ledger.get("as_of", "2026-08-26"))
+            dec = decide_for_debtor(
+                debtor,
+                d_invoices,
+                merchant,
+                as_of_date=as_of_date,
+                history=histories.get(debtor["debtor_id"], NO_HISTORY),
+            )
             decisions.append(dec)
 
     return decisions

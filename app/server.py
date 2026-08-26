@@ -33,6 +33,7 @@ DEMO_INVOICES: dict[str, dict] = {
     "tok_demo1": {
         "invoice_id": "INV-4821",
         "debtor": "Acme Industries Pvt Ltd",
+        "debtor_id": "DEB-001",
         "supplier": "Nandi Precision Components",
         "amount_paise": 380000_00,
         "days_overdue": 18,
@@ -41,6 +42,7 @@ DEMO_INVOICES: dict[str, dict] = {
     "tok_demo2": {
         "invoice_id": "INV-4903",
         "debtor": "Vertex Distributors",
+        "debtor_id": "DEB-002",
         "supplier": "Nandi Precision Components",
         "amount_paise": 47500_00,
         "days_overdue": 4,
@@ -94,6 +96,7 @@ def suppress_on_settlement(token: str, invoice: dict, payment_id: str, amount_pa
         "settlement.confirmed",
         invoice_id=invoice["invoice_id"],
         debtor=invoice["debtor"],
+        debtor_id=invoice["debtor_id"],
         payment_id=payment_id,
         amount_paise=amount_paise,
         # The differentiator: settlement lands on the rail the agent controls, so the
@@ -267,6 +270,7 @@ def record_promise(body: PromiseRequest) -> JSONResponse:
         "promise.made",
         invoice_id=invoice["invoice_id"],
         debtor=invoice["debtor"],
+        debtor_id=invoice["debtor_id"],
         promised_date=body.promised_date.isoformat(),
         promised_amount_paise=amount,
     )
