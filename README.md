@@ -20,7 +20,7 @@ with a full audit trail, measured against a fixed baseline policy on an identica
 | Append-only audit log | Working |
 | Seeded ledger, 70 invoices under 20 debtors | Working, reproducible from a seed |
 | Model failover across a model chain | Working |
-| Policy envelope, strategist, baseline runner | Working, checked offline. Three envelope rules (cooldown, max intensity, active promise) await the promise tracker |
+| Policy envelope, strategist, baseline runner | Working, checked offline. All eight guardrails enforced |
 
 One gap worth naming: the card has not been pushed through Razorpay's checkout iframe
 end to end. Everything either side of it is verified, including signature verification
@@ -92,8 +92,10 @@ python test_decisions.py
 Checks that the hard policy envelope enforces deterministic guardrails (opt-out permanent
 suppression, active dispute protection, MSMED trader refusal, TDS reconciliation, VIP
 relationship protection that fails closed on unknown account value, no money ask on an
-account already settled off-rail, and every independent exclusion ground surviving into the
-audit trail), that hidden behaviour parameters cannot reach a decision and a debtor row
+account already settled off-rail, a seven-day contact cooldown, an escalation ceiling, no
+chasing inside a promise that has not fallen due, and every independent exclusion ground
+surviving into the audit trail), that hidden behaviour parameters cannot reach a decision
+and a debtor row
 without an opt-out flag is refused outright, that a prohibited strategy and an ask outside
 the pre-authorised band are both intercepted **and** left flagged for human review — the
 band is bounded below by the concession floor and above by the collectible balance, so the
@@ -198,6 +200,7 @@ app/
   config.py            environment, fails loudly on missing Razorpay credentials
   ledger.py            seeded synthetic ledger, hidden behaviour params, statutory dates
   envelope.py          hard policy envelope, deterministic guardrails, action classes
+  contact_history.py   cooldown, intensity and open promises, derived from the audit log
   strategist.py        AI recovery strategist, per-debtor structured decision engine
   baseline.py          calendar-based baseline policy runner
   razorpay_gateway.py  order creation, both signature verifications
