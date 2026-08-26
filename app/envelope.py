@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from app.ledger import InvoiceState, Merchant, UdyamActivity, msmed_eligible
+from app.ledger import InvoiceState, Merchant, msmed_eligible
 
 
 class Strategy(StrEnum):
@@ -41,6 +41,19 @@ class ActionClass(StrEnum):
 
 ALL_STRATEGIES = frozenset(Strategy)
 
+# Strategies that put a number in front of the debtor. These are the ones the envelope
+# forbids outright when nothing is collectible, and the ones whose `ask_amount_paise` the
+# strategist must clamp into the pre-authorised band. Keyed on strategy rather than on the
+# sign of the ask, so an ask of 0 or None cannot pass as "no ask at all".
+ASKS_FOR_MONEY = frozenset(
+    {
+        Strategy.REQUEST_PAYMENT,
+        Strategy.OBTAIN_PROMISE,
+        Strategy.NEGOTIATE_PARTIAL,
+        Strategy.ESCALATE,
+    }
+)
+
 
 @dataclass
 class EnvelopeResult:
@@ -50,6 +63,27 @@ class EnvelopeResult:
     max_concession_pct: float
     is_msme_eligible: bool
     msme_eligibility_reason: str
+    # What is actually still owed, after crediting TDS withheld and off-rail settlement.
+    # The single source of truth for every money gate downstream, including the
+    # concession floor the strategist clamps against.
+    collectible_paise: int
+
+
+def _exclude(
+    excluded: dict[Strategy, str],
+    action_classes: dict[Strategy, ActionClass],
+    strategy: Strategy,
+    reason: str,
+) -> None:
+    """Record an exclusion, preserving any ground already established.
+
+    Two rules can independently forbid the same action — an open dispute and an
+    ineligible supplier both block ESCALATE. Overwriting would drop one ground from
+    `excluded_reasons`, which feeds both the prompt and the audit log, so a reader would
+    conclude the action is unblocked once the surviving ground clears.
+    """
+    excluded[strategy] = f"{excluded[strategy]}; also {reason}" if strategy in excluded else reason
+    action_classes[strategy] = ActionClass.PROHIBITED
 
 
 def evaluate_envelope(
@@ -84,12 +118,31 @@ def evaluate_envelope(
     action_classes[Strategy.ESCALATE] = ActionClass.REVIEW_REQUIRED
     action_classes[Strategy.HUMAN_HANDOFF] = ActionClass.REVIEW_REQUIRED
 
-    # 1. OPT-OUT: Absolute permanent suppression
-    if debtor.get("opted_out", False):
+    # Calculate aggregate invoice statistics.
+    # TDS withheld is remitted to the exchequer on the supplier's behalf, so the buyer
+    # who deducted it has paid in full; an off-rail NEFT settlement is likewise already
+    # collected. Neither is a shortfall, so neither may drive a payment demand, a
+    # concession, or an exposure calculation. `outstanding_paise` on the invoice is the
+    # naive figure by design; this is the collectible one.
+    total_amount_paise = sum(i["amount_paise"] for i in invoices)
+    total_received_paise = sum(i.get("amount_received_paise", 0) for i in invoices)
+    total_tds_paise = sum(i.get("tds_deducted_paise", 0) for i in invoices)
+    collectible_paise = total_amount_paise - total_received_paise - total_tds_paise
+
+    # 1. OPT-OUT: Absolute permanent suppression.
+    # Fails CLOSED. An absent flag is not consent: a partial debtor row must never silently
+    # resume chasing someone who opted out. "No exceptions, no 'just one more try.' A no is
+    # a no." This is the most absolute rule in the envelope, so it gets the safest default.
+    opted_out = debtor.get("opted_out")
+    if opted_out is None or opted_out:
         for s in ALL_STRATEGIES:
             if s != Strategy.WAIT:
-                excluded[s] = "debtor has permanently opted out of recovery communications"
-                action_classes[s] = ActionClass.PROHIBITED
+                _exclude(
+                    excluded,
+                    action_classes,
+                    s,
+                    "debtor has permanently opted out of recovery communications",
+                )
         return EnvelopeResult(
             permitted_strategies=[Strategy.WAIT],
             action_classes=action_classes,
@@ -97,12 +150,8 @@ def evaluate_envelope(
             max_concession_pct=0.0,
             is_msme_eligible=is_eligible,
             msme_eligibility_reason=eligibility_reason,
+            collectible_paise=collectible_paise,
         )
-
-    # Calculate aggregate invoice statistics
-    total_amount_paise = sum(i["amount_paise"] for i in invoices)
-    total_received_paise = sum(i.get("amount_received_paise", 0) for i in invoices)
-    total_overdue_paise = total_amount_paise - total_received_paise
 
     has_disputed = any(i.get("state") == InvoiceState.DISPUTED for i in invoices)
     has_tds = any(i.get("state") == InvoiceState.TDS_UNDERPAID for i in invoices)
@@ -112,49 +161,98 @@ def evaluate_envelope(
 
     # 2. DISPUTE: Open disputes require resolution or human review, not aggressive chasing
     if has_disputed:
-        excluded[Strategy.REQUEST_PAYMENT] = "open invoice dispute requires resolution before chasing payment"
-        action_classes[Strategy.REQUEST_PAYMENT] = ActionClass.PROHIBITED
-        excluded[Strategy.ESCALATE] = "cannot escalate an account with an active open dispute"
-        action_classes[Strategy.ESCALATE] = ActionClass.PROHIBITED
+        _exclude(
+            excluded,
+            action_classes,
+            Strategy.REQUEST_PAYMENT,
+            "open invoice dispute requires resolution before chasing payment",
+        )
+        _exclude(
+            excluded,
+            action_classes,
+            Strategy.ESCALATE,
+            "cannot escalate an account with an active open dispute",
+        )
         # RESOLVE_DISPUTE and HUMAN_HANDOFF remain permitted
+
+    # 2b. NOTHING COLLECTIBLE: every open invoice is already settled, by TDS credit or by
+    # off-rail NEFT. Asking for money that has been paid is the naive-agent failure the
+    # PAID_OFF_RAIL and TDS_UNDERPAID states exist to catch, so the envelope forbids it
+    # by construction rather than relying on the prompt to discourage it. RECONCILE stays
+    # open — chasing the UTR or the Form 26AS is exactly the right move here.
+    if collectible_paise <= 0:
+        for money_ask in sorted(ASKS_FOR_MONEY):
+            _exclude(
+                excluded,
+                action_classes,
+                money_ask,
+                "no collectible balance: every open invoice reconciles to face value once "
+                "TDS credit and off-rail settlement are applied",
+            )
 
     # 3. STATUTORY ESCALATION: Gated by MSMED eligibility
     if not is_eligible:
-        excluded[Strategy.ESCALATE] = f"statutory escalation unavailable: {eligibility_reason}"
-        action_classes[Strategy.ESCALATE] = ActionClass.PROHIBITED
+        _exclude(
+            excluded,
+            action_classes,
+            Strategy.ESCALATE,
+            f"statutory escalation unavailable: {eligibility_reason}",
+        )
 
     # 4. RECONCILIATION: Only permitted if TDS discrepancy or off-rail settlement exists
     if not (has_tds or has_off_rail):
-        excluded[Strategy.RECONCILE] = "no TDS discrepancy or off-rail payment detected on open invoices"
-        action_classes[Strategy.RECONCILE] = ActionClass.PROHIBITED
+        _exclude(
+            excluded,
+            action_classes,
+            Strategy.RECONCILE,
+            "no TDS discrepancy or off-rail payment detected on open invoices",
+        )
 
     # 5. DISPUTE RESOLUTION: Only permitted if an invoice is currently disputed
     if not has_disputed:
-        excluded[Strategy.RESOLVE_DISPUTE] = "no disputed invoices on account"
-        action_classes[Strategy.RESOLVE_DISPUTE] = ActionClass.PROHIBITED
+        _exclude(
+            excluded, action_classes, Strategy.RESOLVE_DISPUTE, "no disputed invoices on account"
+        )
 
     # 6. VIP RELATIONSHIP PROTECTION:
-    # If exposure is small relative to trailing-12-month value, direct escalation is prohibited
-    ttm_value = debtor.get("trailing_12m_value_paise", 0)
-    if ttm_value > 0 and (total_overdue_paise / ttm_value) < vip_exposure_ratio and max_days_overdue < 45:
-        if Strategy.ESCALATE not in excluded:
-            excluded[Strategy.ESCALATE] = (
-                f"exposure (Rs {total_overdue_paise // 100:,}) is under {vip_exposure_ratio:.0%} "
-                f"of trailing 12M value (Rs {ttm_value // 100:,}); escalation prohibited to preserve relationship"
+    # If exposure is small relative to trailing-12-month value, direct escalation is
+    # prohibited. Unknown account value fails CLOSED: an account we cannot size is treated
+    # as one worth protecting, because the cost of a wrong escalation is the relationship.
+    # Skipped when nothing is collectible: a zero balance satisfies the exposure ratio
+    # trivially, and recording a relationship-protection ground the agent never weighed
+    # would misrepresent the reasoning in the audit trail. Rule 2b already covers that case.
+    ttm_value = debtor.get("trailing_12m_value_paise") or 0
+    if max_days_overdue < 45 and collectible_paise > 0:
+        if ttm_value <= 0:
+            _exclude(
+                excluded,
+                action_classes,
+                Strategy.ESCALATE,
+                "trailing 12M account value unknown, so exposure cannot be shown to justify "
+                "escalation; protecting the relationship by default",
             )
-            action_classes[Strategy.ESCALATE] = ActionClass.PROHIBITED
+        elif (collectible_paise / ttm_value) < vip_exposure_ratio:
+            _exclude(
+                excluded,
+                action_classes,
+                Strategy.ESCALATE,
+                f"exposure (Rs {collectible_paise // 100:,}) is under {vip_exposure_ratio:.0%} "
+                f"of trailing 12M value (Rs {ttm_value // 100:,}); escalation prohibited to "
+                "preserve relationship",
+            )
 
-    # 7. PARTIAL NEGOTIATION: Permitted if partial payment history or substantial overdue amount
-    if total_overdue_paise < 50_000_00 and not has_partially_paid:
-        excluded[Strategy.NEGOTIATE_PARTIAL] = "invoice balance too small for concession negotiation"
-        action_classes[Strategy.NEGOTIATE_PARTIAL] = ActionClass.PROHIBITED
+    # 7. PARTIAL NEGOTIATION: Permitted if partial payment history or substantial balance
+    if collectible_paise < 50_000_00 and not has_partially_paid:
+        _exclude(
+            excluded,
+            action_classes,
+            Strategy.NEGOTIATE_PARTIAL,
+            "invoice balance too small for concession negotiation",
+        )
 
-    # Determine final permitted strategies preserving ordering
+    # Determine final permitted strategies preserving ordering. WAIT is never excluded by
+    # any rule above, so this is never empty.
     permitted = [s for s in Strategy if s not in excluded]
-
-    # Safety guarantee: WAIT and HUMAN_HANDOFF are always safe fallbacks
-    if not permitted:
-        permitted = [Strategy.WAIT, Strategy.HUMAN_HANDOFF]
 
     return EnvelopeResult(
         permitted_strategies=permitted,
@@ -163,4 +261,5 @@ def evaluate_envelope(
         max_concession_pct=max_concession_pct,
         is_msme_eligible=is_eligible,
         msme_eligibility_reason=eligibility_reason,
+        collectible_paise=collectible_paise,
     )
