@@ -107,7 +107,7 @@ def suppress_on_settlement(token: str, invoice: dict, payment_id: str, amount_pa
 def health() -> dict[str, object]:
     return {
         "ok": True,
-        "razorpay_key_id": config.RAZORPAY_KEY_ID,
+        "key_configured": bool(config.RAZORPAY_KEY_ID),
         "webhook_secret_configured": bool(config.RAZORPAY_WEBHOOK_SECRET),
         "model_key_configured": bool(config.GOOGLE_API_KEY),
         "model": config.LLM_MODEL,

@@ -114,10 +114,22 @@ def test_inr_formatting() -> None:
     print("ok  indian digit grouping")
 
 
+def test_health_endpoint() -> None:
+    from app.server import health
+
+    res = health()
+    assert res.get("ok") is True
+    assert "key_configured" in res
+    assert "razorpay_key_id" not in res
+    print("ok  health endpoint sanitisation")
+
+
 if __name__ == "__main__":
     test_payment_signature()
     test_webhook_signature()
     test_webhook_secret_required()
     test_amount_validation()
     test_inr_formatting()
+    test_health_endpoint()
     print("\nall checks passed")
+
