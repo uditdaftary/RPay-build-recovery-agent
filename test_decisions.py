@@ -22,8 +22,10 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from contextlib import contextmanager
 from datetime import date
+from pathlib import Path
 
 from app import audit, llm
 from app.baseline import decide_baseline, rung_for_days, run_baseline_batch
@@ -39,6 +41,25 @@ from app.ledger import LEDGER_PATH, InvoiceState, Merchant, UdyamActivity, agent
 from app.strategist import decide_for_debtor, run_strategist_batch
 
 RUN_LIVE_LLM_CHECKS = os.getenv("RUN_LIVE_LLM_CHECKS") == "1"
+
+
+@contextmanager
+def isolated_audit_log():
+    """Point the append-only log at a scratch directory for the duration of the suite.
+
+    The envelope derives cooldown, escalation count and open promises from this log, so it
+    is an input to a decision, not only a record of one. A suite that writes to the real
+    log changes what the next run decides, and stops being repeatable — which is the exact
+    property the seeded ledger exists to guarantee.
+    """
+    original_dir, original_log = audit.AUDIT_DIR, audit.EVENT_LOG
+    with tempfile.TemporaryDirectory(prefix="recovery-agent-audit-") as scratch:
+        audit.AUDIT_DIR = Path(scratch)
+        audit.EVENT_LOG = audit.AUDIT_DIR / "events.jsonl"
+        try:
+            yield
+        finally:
+            audit.AUDIT_DIR, audit.EVENT_LOG = original_dir, original_log
 
 
 @contextmanager
@@ -214,6 +235,60 @@ def test_envelope_contact_cooldown() -> None:
     )
     assert silent.get("DEB-HIST", NO_HISTORY).days_since_last_contact is None
     print("ok  envelope honours the contact-frequency cooldown")
+
+
+def test_history_is_bounded_by_as_of() -> None:
+    """Every fold is as at `as_of`. An event stamped later must not move any of them."""
+    as_of = date(2026, 8, 26)
+    later = "2026-12-01T09:00:00+00:00"
+
+    escalations = build_contact_history(
+        as_of,
+        [
+            _contact("D", "2026-07-01T09:00:00+00:00", strategy="ESCALATE"),
+            _contact("D", later, strategy="ESCALATE"),
+        ],
+    )["D"]
+    assert escalations.escalations_sent == 1, "an escalation after the cutoff was counted"
+
+    future_promise = build_contact_history(
+        as_of,
+        [{"ts": later, "event": "promise.made", "debtor_id": "D", "promised_date": "2027-01-01"}],
+    )
+    assert future_promise.get("D", NO_HISTORY).active_promise_date is None, (
+        "a promise recorded after the cutoff shielded the debtor before it was made"
+    )
+
+    still_open = build_contact_history(
+        as_of,
+        [
+            {"ts": "2026-08-01T09:00:00+00:00", "event": "promise.made", "debtor_id": "D",
+             "promised_date": "2026-09-15", "promised_amount_paise": 100},
+            {"ts": later, "event": "settlement.confirmed", "debtor_id": "D"},
+        ],
+    )["D"]
+    assert still_open.active_promise_date == date(2026, 9, 15), (
+        "a settlement after the cutoff closed a promise that was open at it"
+    )
+    print("ok  contact history is bounded by as_of on every fold")
+
+
+def test_history_reads_a_missing_channel_as_silence() -> None:
+    """Legacy rows with no channel are suppression records, not outreach."""
+    as_of = date(2026, 8, 26)
+    stamp = "2026-08-25T09:00:00+00:00"
+
+    for label, row in (
+        ("absent key", {"ts": stamp, "event": "decision.made", "debtor_id": "D", "strategy": "WAIT"}),
+        ("explicit null", {"ts": stamp, "event": "decision.made", "debtor_id": "D", "strategy": "WAIT", "channel": None}),
+        ("channel none", _contact("D", stamp, strategy="WAIT", channel="none")),
+    ):
+        history = build_contact_history(as_of, [row]).get("D", NO_HISTORY)
+        assert history.days_since_last_contact is None, f"{label} was counted as outreach"
+
+    real = build_contact_history(as_of, [_contact("D", stamp)])["D"]
+    assert real.days_since_last_contact == 1, "a genuine email failed to start a cooldown"
+    print("ok  a decision with no channel does not start a cooldown")
 
 
 def test_envelope_max_intensity() -> None:
@@ -829,33 +904,36 @@ def live_agent_vs_baseline() -> None:
 
 
 if __name__ == "__main__":
-    test_envelope_opt_out()
-    test_envelope_disputed_invoice()
-    test_envelope_msmed_trader_refusal()
-    test_envelope_tds_reconciliation()
-    test_envelope_vip_protection()
-    test_envelope_settled_account_blocks_money_asks()
-    test_envelope_unknown_account_value_fails_closed()
-    test_envelope_preserves_multiple_exclusion_grounds()
-    test_agent_view_projection()
-    test_missing_optout_flag_is_refused()
-    test_intercepted_violation_requires_review()
-    test_ask_is_clamped_into_the_authorised_band()
-    test_tds_withheld_cannot_be_demanded_back()
-    test_non_money_strategy_carries_no_ask()
-    test_unusable_deadline_and_channel_are_refused()
-    test_decision_made_has_one_shape()
-    test_limit_of_zero_evaluates_nobody()
-    test_optout_suppression_needs_no_model()
-    test_envelope_contact_cooldown()
-    test_envelope_max_intensity()
-    test_envelope_active_promise()
-    test_baseline_policy()
-    test_baseline_ladder_and_its_collapse()
-    print("\nall decision tests passed")
+    with isolated_audit_log():
+        test_envelope_opt_out()
+        test_envelope_disputed_invoice()
+        test_envelope_msmed_trader_refusal()
+        test_envelope_tds_reconciliation()
+        test_envelope_vip_protection()
+        test_envelope_settled_account_blocks_money_asks()
+        test_envelope_unknown_account_value_fails_closed()
+        test_envelope_preserves_multiple_exclusion_grounds()
+        test_agent_view_projection()
+        test_missing_optout_flag_is_refused()
+        test_intercepted_violation_requires_review()
+        test_ask_is_clamped_into_the_authorised_band()
+        test_tds_withheld_cannot_be_demanded_back()
+        test_non_money_strategy_carries_no_ask()
+        test_unusable_deadline_and_channel_are_refused()
+        test_decision_made_has_one_shape()
+        test_limit_of_zero_evaluates_nobody()
+        test_optout_suppression_needs_no_model()
+        test_envelope_contact_cooldown()
+        test_history_is_bounded_by_as_of()
+        test_history_reads_a_missing_channel_as_silence()
+        test_envelope_max_intensity()
+        test_envelope_active_promise()
+        test_baseline_policy()
+        test_baseline_ladder_and_its_collapse()
+        print("\nall decision tests passed")
 
-    if RUN_LIVE_LLM_CHECKS:
-        live_wait_restraint_check()
-        live_agent_vs_baseline()
-    else:
-        print("\nskipped the live model batch; set RUN_LIVE_LLM_CHECKS=1 to run it")
+        if RUN_LIVE_LLM_CHECKS:
+            live_wait_restraint_check()
+            live_agent_vs_baseline()
+        else:
+            print("\nskipped the live model batch; set RUN_LIVE_LLM_CHECKS=1 to run it")
