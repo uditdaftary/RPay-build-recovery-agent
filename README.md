@@ -20,7 +20,7 @@ with a full audit trail, measured against a fixed baseline policy on an identica
 | Append-only audit log | Working |
 | Seeded ledger, 70 invoices under 20 debtors | Working, reproducible from a seed |
 | Model failover across a model chain | Working |
-| Policy envelope, strategist, baseline runner | Not built yet |
+| Policy envelope, strategist, baseline runner | Working, with comparative decision checks |
 
 One gap worth naming: the card has not been pushed through Razorpay's checkout iframe
 end to end. Everything either side of it is verified, including signature verification
@@ -45,7 +45,7 @@ cp .env.example .env
 | `RAZORPAY_WEBHOOK_SECRET` | Webhooks only | Set by you when creating the webhook. **Not the key secret.** |
 | `GOOGLE_API_KEY` | The decision engine | https://aistudio.google.com/apikey |
 | `LLM_MODEL` | The decision engine | Defaults to `gemini-3.6-flash` |
-| `LLM_FALLBACK_MODELS` | Surviving a model outage | Defaults to `gemini-3.5-flash,gemini-flash-latest` |
+| `LLM_FALLBACK_MODELS` | Surviving a model outage | Defaults to `gemini-3.5-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite` |
 | `LLM_TIMEOUT_MS` | Bounding a slow call | Defaults to `20000` |
 
 Note that `gemini-2.5-flash` appears in `models.list()` but returns 404 on
@@ -84,6 +84,16 @@ seeds diverge, that all four failure states are present, that TDS invoices recon
 face value, that the statutory window is measured from acceptance, that exactly one
 merchant can invoke the statute, and that the hidden behaviour parameters never reach the
 agent's view.
+
+```bash
+python test_decisions.py
+```
+
+Checks that the hard policy envelope enforces deterministic guardrails (opt-out permanent
+suppression, active dispute protection, MSMED trader refusal, TDS reconciliation, VIP
+relationship protection), that the baseline policy progresses monotonically on calendar
+days overdue, and that the AI recovery strategist and baseline runner produce demonstrably
+divergent decisions across the seeded batch.
 
 ### Razorpay test instruments
 
@@ -167,6 +177,9 @@ deploy.
 app/
   config.py            environment, fails loudly on missing Razorpay credentials
   ledger.py            seeded synthetic ledger, hidden behaviour params, statutory dates
+  envelope.py          hard policy envelope, deterministic guardrails, action classes
+  strategist.py        AI recovery strategist, per-debtor structured decision engine
+  baseline.py          calendar-based baseline policy runner
   razorpay_gateway.py  order creation, both signature verifications
   llm.py               single model call site, model failover
   audit.py             append-only JSONL event log
@@ -174,4 +187,5 @@ app/
   templates/           debtor resolution page
 data/ledger.json       generated ledger, committed so results are reproducible
 test_signatures.py     runnable checks for the money path
+test_decisions.py      runnable checks for the envelope, baseline, and decision divergence
 ```
