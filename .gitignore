@@ -1,0 +1,19 @@
+# Secrets — never commit. This file exists before .env by design.
+.env
+.env.local
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Runtime artifacts
+*.db
+*.sqlite3
+runs/
+audit/*.jsonl
+.DS_Store
