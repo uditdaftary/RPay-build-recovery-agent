@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}Invoice {{ invoice.invoice_id }}{% endblock %}
+
+{% block content %}
+<h1>{{ invoice.supplier }}</h1>
+<p class="muted small">Invoice {{ invoice.invoice_id }} for {{ invoice.debtor }}</p>
+
+<div class="card">
+  <div class="muted small">Amount outstanding</div>
+  <div class="amount">&#8377;{{ amount_display }}</div>
+  <span class="chip">{{ invoice.days_overdue }} days past due</span>
+
+  <div style="margin-top:18px">
+    <button class="primary" id="pay">Pay &#8377;{{ amount_display }} now</button>
+  </div>
+  <div id="pay-status"></div>
+</div>
+
+<div class="card">
+  <h2>Cannot pay today?</h2>
+  <p class="muted small">Tell us when, and we will hold the follow ups until then.</p>
+
+  <details>
+    <summary>Choose a payment date</summary>
+    <div>
+      <label class="small muted" for="promised-date">Date you expect to pay</label>
+      <input type="date" id="promised-date">
+      <button id="promise">Commit to this date</button>
+      <div id="promise-status"></div>
+    </div>
+  </details>
+
+  <details>
+    <summary>Something is wrong with this invoice</summary>
+    <div>
+      <label class="small muted" for="dispute-reason">What is the problem?</label>
+      <textarea id="dispute-reason" placeholder="For example: the goods were short delivered, or this was already paid by NEFT on 12 August."></textarea>
+      <button id="dispute">Raise a dispute</button>
+      <div id="dispute-status"></div>
+    </div>
+  </details>
+</div>
+
+<p class="muted small">
+  Raising a dispute stops all automated follow ups on this invoice immediately and sends it
+  to a person to review.
+</p>
+{% endblock %}
+
+{% block scripts %}
+{#
+  No subresource integrity hash on checkout.js by design. Razorpay ships this URL
+  unversioned and updates it in place, so a pinned hash would start failing payments
+  silently on their next deploy. This is the integration Razorpay documents.
+#}
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script>
+  const TOKEN = {{ token | tojson }};
+  const KEY_ID = {{ razorpay_key_id | tojson }};
+  const INVOICE_ID = {{ invoice.invoice_id | tojson }};
+  const DEBTOR = {{ invoice.debtor | tojson }};
+
+  function show(id, message, ok) {
+    const el = document.getElementById(id);
+    el.className = "status " + (ok ? "ok" : "err");
+    el.textContent = message;
+  }
+
+  async function postJSON(url, body) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || ("Request failed with status " + res.status));
+    return data;
+  }
+
+  document.getElementById("pay").addEventListener("click", async () => {
+    const button = document.getElementById("pay");
+    button.disabled = true;
+    try {
+      const order = await postJSON("/api/create-order", { token: TOKEN });
+
+      const checkout = new Razorpay({
+        key: KEY_ID,
+        order_id: order.order_id,
+        amount: order.amount,
+        currency: order.currency,
+        name: {{ invoice.supplier | tojson }},
+        description: "Invoice " + INVOICE_ID,
+        prefill: { name: DEBTOR },
+        modal: {
+          ondismiss: () => {
+            button.disabled = false;
+            show("pay-status", "Payment was cancelled. Nothing has been charged.", false);
+          },
+        },
+        handler: async (response) => {
+          try {
+            await postJSON("/api/verify-payment", {
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+            });
+            show("pay-status", "Payment received. Thank you, this invoice is now settled.", true);
+          } catch (err) {
+            // Verification failed in the browser, but the webhook is the system of
+            // record, so never tell the payer their money is lost.
+            show("pay-status", "Payment went through but we could not confirm it here. Our team will reconcile it.", false);
+          }
+        },
+      });
+
+      checkout.on("payment.failed", (response) => {
+        button.disabled = false;
+        const reason = (response.error && response.error.description) || "The payment did not go through.";
+        show("pay-status", reason, false);
+      });
+
+      checkout.open();
+    } catch (err) {
+      button.disabled = false;
+      show("pay-status", err.message, false);
+    }
+  });
+
+  document.getElementById("promise").addEventListener("click", async () => {
+    const value = document.getElementById("promised-date").value;
+    if (!value) { show("promise-status", "Pick a date first.", false); return; }
+    try {
+      await postJSON("/api/promise", { token: TOKEN, promised_date: value });
+      show("promise-status", "Noted. We will check back on " + value + ".", true);
+    } catch (err) {
+      show("promise-status", err.message, false);
+    }
+  });
+
+  document.getElementById("dispute").addEventListener("click", async () => {
+    const reason = document.getElementById("dispute-reason").value.trim();
+    if (!reason) { show("dispute-status", "Tell us briefly what is wrong.", false); return; }
+    try {
+      await postJSON("/api/dispute", { token: TOKEN, reason });
+      show("dispute-status", "Raised. Automated follow ups on this invoice have stopped.", true);
+    } catch (err) {
+      show("dispute-status", err.message, false);
+    }
+  });
+</script>
+{% endblock %}
