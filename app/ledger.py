@@ -30,6 +30,7 @@ from datetime import date, timedelta
 from enum import StrEnum
 from pathlib import Path
 
+from app import audit
 from app.config import PROJECT_ROOT
 
 # The ledger is generated relative to a fixed "today" so that runs are reproducible
@@ -135,8 +136,12 @@ def agent_view(debtor: dict) -> dict:
     allowed to be the reason someone who opted out gets chased again.
     """
     if "opted_out" not in debtor:
+        debtor_id = debtor.get("debtor_id", "<unknown>")
+        # Logged before raising, so a run that stops here explains itself in the same place
+        # the unknown-merchant refusal does. A stack trace is not an audit trail.
+        audit.record("ledger.unprojectable_debtor", debtor_id=debtor_id, missing_field="opted_out")
         raise KeyError(
-            f"debtor {debtor.get('debtor_id', '<unknown>')} has no `opted_out` field; "
+            f"debtor {debtor_id} has no `opted_out` field; "
             "suppression cannot be evaluated and the row must not reach the agent"
         )
     return {field: debtor[field] for field in AGENT_VISIBLE_FIELDS if field in debtor}
