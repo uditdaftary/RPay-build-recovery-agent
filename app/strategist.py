@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import date
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -32,6 +34,30 @@ from app.envelope import (
 from app.ledger import agent_view
 
 
+# The envelope hardens which strategy may run; these harden how it reaches the debtor.
+# Enumerated for the same reason Strategy and ActionClass are: a member the model invented
+# must fail validation rather than reach a dispatcher that has no branch for it.
+class Channel(StrEnum):
+    EMAIL = "email"
+    WHATSAPP = "whatsapp"
+    PORTAL = "portal"
+    NONE = "none"
+
+
+class Language(StrEnum):
+    EN = "en"
+    HI = "hi"
+    HINGLISH = "hinglish"
+
+
+class Tone(StrEnum):
+    COLLABORATIVE = "collaborative"
+    FIRM = "firm"
+    FORMAL = "formal"
+    CONCILIATORY = "conciliatory"
+    NEUTRAL = "neutral"
+
+
 class RejectedAction(BaseModel):
     strategy: Strategy
     reason: str
@@ -41,11 +67,13 @@ class StrategistDecision(BaseModel):
     debtor_id: str
     debtor_name: str
     strategy: Strategy
-    channel: str  # email | whatsapp | portal | none
-    language: str  # en | hi | hinglish
-    tone: str  # collaborative | firm | formal | conciliatory | neutral
+    channel: Channel
+    language: Language
+    tone: Tone
     ask_amount_paise: int | None = None
-    deadline_requested: str | None = None
+    # A real date, not prose. The promise tracker auto-checks this on the day it names, so
+    # "next Tuesday" has to fail here rather than on the day it was supposed to fire.
+    deadline_requested: date | None = None
     reasoning: str
     rejected_actions: list[RejectedAction] = []
     confidence: float = Field(ge=0.0, le=1.0)
@@ -75,6 +103,29 @@ Core rules and principles:
 def _format_inr(paise: int) -> str:
     rupees = paise // 100
     return f"Rs {rupees:,}"
+
+
+def _record_decision(decision: StrategistDecision) -> None:
+    """Write `decision.made` in one shape, whatever path produced the decision.
+
+    The suppression fast path used to emit a shorter record than the model path, so the
+    opted-out debtor — the row the pitch leans on — was the one missing the action class,
+    channel and rejected alternatives the results page reads.
+    """
+    audit.record(
+        "decision.made",
+        debtor_id=decision.debtor_id,
+        debtor_name=decision.debtor_name,
+        strategy=decision.strategy,
+        action_class=decision.action_class,
+        review_required=decision.review_required,
+        channel=decision.channel,
+        tone=decision.tone,
+        ask_amount_paise=decision.ask_amount_paise,
+        deadline_requested=decision.deadline_requested,
+        reasoning=decision.reasoning,
+        rejected_actions=[r.model_dump() for r in decision.rejected_actions],
+    )
 
 
 def decide_for_debtor(
@@ -124,13 +175,7 @@ def decide_for_debtor(
             review_required=False,
             action_class=ActionClass.AUTOMATABLE,
         )
-        audit.record(
-            "decision.made",
-            debtor_id=debtor_id,
-            strategy=decision.strategy,
-            review_required=decision.review_required,
-            reasoning=decision.reasoning,
-        )
+        _record_decision(decision)
         return decision
 
     # Build prompt payload. The envelope already netted off TDS credit and off-rail
@@ -283,6 +328,39 @@ Return your structured decision according to the schema. Ensure strategy is one 
             )
             decision.ask_amount_paise = bounded
             decision.review_required = True
+    elif decision.ask_amount_paise:
+        # The other half of the same rule. RECONCILE asks for a Form 26AS or a UTR and
+        # WAIT asks for nothing at all; an amount riding along on either becomes a demand
+        # for money once a decision is rendered into a message.
+        audit.record(
+            "envelope.ask_on_non_money_strategy",
+            debtor_id=debtor_id,
+            strategy=decision.strategy,
+            attempted_ask_paise=decision.ask_amount_paise,
+        )
+        decision.reasoning = (
+            f"Policy envelope dropped an ask of Rs {decision.ask_amount_paise // 100:,} from a "
+            f"{decision.strategy.value} decision, which asks for no money. " + decision.reasoning
+        )
+        decision.ask_amount_paise = 0
+        decision.review_required = True
+
+    # A deadline the promise tracker cannot act on is worse than none: it would be logged
+    # as a commitment and then never fire. `as_of_date` is the reference, not the wall
+    # clock, because the whole experiment is pinned to the ledger's date.
+    if decision.deadline_requested is not None and decision.deadline_requested < date.fromisoformat(as_of_date):
+        audit.record(
+            "envelope.deadline_in_past",
+            debtor_id=debtor_id,
+            deadline_requested=decision.deadline_requested,
+            as_of=as_of_date,
+        )
+        decision.reasoning = (
+            f"Policy envelope dropped a deadline of {decision.deadline_requested.isoformat()}, "
+            f"which is already past as of {as_of_date}. " + decision.reasoning
+        )
+        decision.deadline_requested = None
+        decision.review_required = True
 
     # Set action class from the envelope. `review_required` is sticky: an interception or a
     # clamp above already demanded human review, and recomputing it from the action class
@@ -292,18 +370,7 @@ Return your structured decision according to the schema. Ensure strategy is one 
         decision.review_required or decision.action_class == ActionClass.REVIEW_REQUIRED
     )
 
-    audit.record(
-        "decision.made",
-        debtor_id=debtor_id,
-        debtor_name=debtor_name,
-        strategy=decision.strategy,
-        action_class=decision.action_class,
-        review_required=decision.review_required,
-        channel=decision.channel,
-        tone=decision.tone,
-        reasoning=decision.reasoning,
-        rejected_actions=[r.model_dump() for r in decision.rejected_actions],
-    )
+    _record_decision(decision)
 
     return decision
 
@@ -317,7 +384,9 @@ def run_strategist_batch(
     for inv in ledger["invoices"]:
         invoices_by_debtor.setdefault(inv["debtor_id"], []).append(inv)
 
-    debtors = ledger["debtors"][:limit] if limit else ledger["debtors"]
+    # `is None` rather than truthiness: limit=0 means evaluate nobody, and every debtor
+    # here is a live model call, so conflating it with "no limit" runs the whole book.
+    debtors = ledger["debtors"] if limit is None else ledger["debtors"][:limit]
     decisions: list[StrategistDecision] = []
 
     for debtor in debtors:
