@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Recovery agent, demo invoices{% endblock %}
+
+{% block content %}
+<h1>Recovery agent</h1>
+<p class="muted small">
+  Placeholder invoices so the payment path is runnable before the seeded ledger lands.
+  Each link is the page a debtor would receive.
+</p>
+
+{% for inv in invoices %}
+<div class="card">
+  <div class="row"><span class="muted">Invoice</span><span>{{ inv.invoice_id }}</span></div>
+  <div class="row"><span class="muted">Debtor</span><span>{{ inv.debtor }}</span></div>
+  <div class="row"><span class="muted">Amount</span><span>&#8377;{{ inv.amount_display }}</span></div>
+  <div class="row"><span class="muted">Overdue</span><span>{{ inv.days_overdue }} days</span></div>
+  <div class="row"><span class="muted">Status</span><span><span class="chip">{{ inv.status }}</span></span></div>
+  <div style="margin-top:14px">
+    <a class="btn" href="/r/{{ inv.token }}">Open the debtor view</a>
+  </div>
+</div>
+{% endfor %}
+
+<p class="muted small">
+  Settlement is confirmed by the Razorpay webhook, not by the browser callback, so the
+  ladder halts even if the payer closes the tab. See <a href="/health">/health</a> for
+  which credentials are configured.
+</p>
+{% endblock %}
