@@ -371,24 +371,37 @@ Return your structured decision according to the schema. Ensure strategy is one 
         decision.ask_amount_paise = 0
         decision.review_required = True
 
-    # A strategy that reaches nobody must not carry a delivery channel. `contact_history`
-    # reads any channel other than NONE on a `decision.made` row as outreach, so a WAIT
-    # left holding "email" starts the debtor's cooldown and suppresses the next seven days
-    # of chasing on the strength of a message that was never sent. That inverts the point
-    # of WAIT: restraint would silence the account instead of leaving it available.
-    if decision.strategy in NO_CONTACT_STRATEGIES and decision.channel != Channel.NONE:
-        audit.record(
-            "envelope.channel_on_no_contact_strategy",
-            debtor_id=debtor_id,
-            strategy=decision.strategy,
-            attempted_channel=decision.channel,
-        )
-        decision.reasoning = (
-            f"Policy envelope dropped a {decision.channel.value} channel from a "
-            f"{decision.strategy.value} decision, which contacts nobody. " + decision.reasoning
-        )
-        decision.channel = Channel.NONE
-        decision.review_required = True
+    # A strategy that reaches nobody must carry no delivery field at all. `contact_history`
+    # reads any channel other than NONE on a `decision.made` row as outreach, so a WAIT left
+    # holding "email" starts the debtor's cooldown and suppresses the next seven days of
+    # chasing on a message never sent — restraint silencing the account instead of leaving it
+    # available. A deadline is worse: the promise tracker auto-checks it on the day it names,
+    # so it would fire on a commitment nobody was ever asked to make.
+    #
+    # Cleared together rather than one rule per field. The ask is already stripped above by
+    # the money-ask branch, which is exactly how the deadline came to be missed: three fields
+    # governed by one idea, enforced in three places.
+    if decision.strategy in NO_CONTACT_STRATEGIES:
+        stray: dict[str, Any] = {}
+        if decision.channel != Channel.NONE:
+            stray["channel"] = decision.channel
+        if decision.deadline_requested is not None:
+            stray["deadline_requested"] = decision.deadline_requested
+        if stray:
+            audit.record(
+                "envelope.delivery_fields_on_no_contact_strategy",
+                debtor_id=debtor_id,
+                strategy=decision.strategy,
+                dropped=stray,
+            )
+            decision.reasoning = (
+                f"Policy envelope dropped {' and '.join(sorted(stray))} from a "
+                f"{decision.strategy.value} decision, which contacts nobody. "
+                + decision.reasoning
+            )
+            decision.channel = Channel.NONE
+            decision.deadline_requested = None
+            decision.review_required = True
 
     # A deadline the promise tracker cannot act on is worse than none: it would be logged
     # as a commitment and then never fire. `as_of_date` is the reference, not the wall

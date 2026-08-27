@@ -730,16 +730,22 @@ def test_bad_rejected_alternative_does_not_void_a_decision() -> None:
     print("ok  an unrecognised rejected alternative is dropped, not fatal")
 
 
-def test_no_contact_strategy_carries_no_channel() -> None:
-    """WAIT and HUMAN_HANDOFF reach nobody, so neither may start a contact cooldown."""
+def test_no_contact_strategy_carries_no_delivery_fields() -> None:
+    """WAIT and HUMAN_HANDOFF reach nobody: no channel, no deadline, no cooldown."""
     debtor, invoices, merchant = _first_debtor_with_tds(_load_ledger())
 
     for strategy in sorted(NO_CONTACT_STRATEGIES):
-        with stub_llm(_decision_payload(strategy.value, None, channel="email")):
+        payload = _decision_payload(
+            strategy.value, None, deadline="2026-12-31", channel="email"
+        )
+        with stub_llm(payload):
             decision = decide_for_debtor(debtor, invoices, merchant, history=NO_HISTORY)
         assert decision.strategy == strategy, f"{strategy} was not the decision under test"
         assert decision.channel == Channel.NONE, f"{strategy} kept a delivery channel"
-        assert decision.review_required, f"stray channel on {strategy} was not flagged"
+        # A future deadline passes the in-the-past check, so only this rule catches it. The
+        # promise tracker fires on the day a deadline names, and nobody was asked for one.
+        assert decision.deadline_requested is None, f"{strategy} kept an uncommunicated deadline"
+        assert decision.review_required, f"stray delivery fields on {strategy} were not flagged"
 
     # The reason the channel matters: contact_history reads a channel as outreach, and the
     # envelope reads recent outreach as a reason to stop chasing. A WAIT that kept "email"
@@ -753,7 +759,7 @@ def test_no_contact_strategy_carries_no_channel() -> None:
     assert silenced.get("DEB-WAIT", NO_HISTORY).days_since_last_contact is None, (
         "a WAIT with no channel still started a cooldown"
     )
-    print("ok  a strategy that contacts nobody carries no channel")
+    print("ok  a strategy that contacts nobody carries no delivery fields")
 
 
 def test_decision_made_has_one_shape() -> None:
@@ -977,7 +983,7 @@ if __name__ == "__main__":
         test_ask_is_clamped_into_the_authorised_band()
         test_tds_withheld_cannot_be_demanded_back()
         test_non_money_strategy_carries_no_ask()
-        test_no_contact_strategy_carries_no_channel()
+        test_no_contact_strategy_carries_no_delivery_fields()
         test_bad_rejected_alternative_does_not_void_a_decision()
         test_unusable_deadline_and_channel_are_refused()
         test_decision_made_has_one_shape()
