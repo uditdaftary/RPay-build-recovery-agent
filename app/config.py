@@ -6,6 +6,7 @@ instead, so the checkout path stays runnable before those are provisioned.
 """
 
 import os
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -66,3 +67,16 @@ LLM_FALLBACK_MODELS = [
 LLM_TIMEOUT_MS = int(os.getenv("LLM_TIMEOUT_MS", "20000"))
 
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
+
+
+# The whole book is Indian receivables, so a business day here is an IST day. Pinned rather
+# than taken from the host clock: a server in UTC would call everything between 00:00 and
+# 05:30 IST yesterday, which is exactly the drift that once made a contact look a day older
+# than it was and lifted a cooldown early. Both the audit fold and the promise endpoint read
+# their "today" from here so the two cannot disagree.
+BUSINESS_TZ = timezone(timedelta(hours=5, minutes=30))
+
+
+def business_today() -> date:
+    """Today, as the business reckons it."""
+    return datetime.now(BUSINESS_TZ).date()

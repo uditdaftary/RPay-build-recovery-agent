@@ -23,7 +23,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, field_validator
 
 from app import audit, config, razorpay_gateway
-from app.config import PROJECT_ROOT
+from app.config import PROJECT_ROOT, business_today
 
 app = FastAPI(title="B2B Receivables Recovery Agent")
 templates = Jinja2Templates(directory=str(PROJECT_ROOT / "app" / "templates"))
@@ -191,8 +191,8 @@ def resolution_page(request: Request, token: str) -> HTMLResponse:
             # computed here rather than in the browser: the validator compares against this
             # machine's clock, so a debtor in another timezone was offered a first or last
             # day the server then refused.
-            "promise_min": date.today().isoformat(),
-            "promise_max": (date.today() + timedelta(days=MAX_PROMISE_HORIZON_DAYS)).isoformat(),
+            "promise_min": business_today().isoformat(),
+            "promise_max": (business_today() + timedelta(days=MAX_PROMISE_HORIZON_DAYS)).isoformat(),
             "dispute_reason_max": DISPUTE_REASON_MAX,
         },
     )
@@ -313,8 +313,9 @@ class PromiseRequest(BaseModel):
     @classmethod
     def _within_horizon(cls, value: date) -> date:
         # The wall clock, not the ledger's as_of: a debtor filling this in is committing in
-        # real time, whatever fixed date the seeded experiment is pinned to.
-        today = date.today()
+        # real time, whatever fixed date the seeded experiment is pinned to. Read in the
+        # business timezone so a host in UTC does not refuse today's date as already past.
+        today = business_today()
         if value < today:
             raise ValueError("promised date is in the past")
         if value > today + timedelta(days=MAX_PROMISE_HORIZON_DAYS):

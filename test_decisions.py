@@ -373,9 +373,10 @@ def test_promise_horizon_bounds_the_suppression_window() -> None:
     from fastapi.testclient import TestClient
     from pydantic import ValidationError
 
+    from app.config import business_today
     from app.server import MAX_PROMISE_HORIZON_DAYS, PromiseRequest, app
 
-    today = date.today()
+    today = business_today()
     inside = PromiseRequest(token="tok_demo1", promised_date=today + timedelta(days=7))
     assert inside.promised_date == today + timedelta(days=7), "a normal promise was altered"
 
