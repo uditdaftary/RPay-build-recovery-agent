@@ -393,9 +393,10 @@ def test_promise_horizon_bounds_the_suppression_window() -> None:
 
     # And the refusal has to be readable, because the resolution page is the one surface a
     # debtor sees. FastAPI's own 422 body would render there as a bare status code.
-    rejected = TestClient(app).post(
-        "/api/promise", json={"token": "tok_demo1", "promised_date": "2099-01-01"}
-    )
+    with TestClient(app) as client:
+        rejected = client.post(
+            "/api/promise", json={"token": "tok_demo1", "promised_date": "2099-01-01"}
+        )
     assert rejected.status_code == 422
     assert "error" in rejected.json(), f"page cannot read the refusal: {rejected.json()}"
     print("ok  a debtor cannot promise past the suppression horizon")
