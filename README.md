@@ -20,7 +20,7 @@ with a full audit trail, measured against a fixed baseline policy on an identica
 | Append-only audit log | Working |
 | Seeded ledger, 70 invoices under 20 debtors | Working, reproducible from a seed |
 | Model failover across a model chain | Working |
-| Policy envelope, strategist, baseline runner | Working, checked offline. All eight guardrails enforced |
+| Policy envelope, strategist, baseline runner | Working, checked offline. All eleven guardrails enforced |
 
 One gap worth naming: the card has not been pushed through Razorpay's checkout iframe
 end to end. Everything either side of it is verified, including signature verification
