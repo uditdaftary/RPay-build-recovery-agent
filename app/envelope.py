@@ -1,6 +1,6 @@
 """Hard policy envelope for the recovery agent.
 
-Stage 1 of the decision engine. Deterministic, ~50 lines.
+Stage 1 of the decision engine. Deterministic: no model call, no I/O, no clock.
 
 Given debtor state (agent view only), open invoices, and merchant metadata, the envelope
 returns the permitted action set, action classifications (AUTOMATABLE, REVIEW_REQUIRED,
