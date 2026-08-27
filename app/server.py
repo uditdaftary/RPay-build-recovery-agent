@@ -187,9 +187,12 @@ def resolution_page(request: Request, token: str) -> HTMLResponse:
             "invoice": invoice,
             "amount_display": format_inr(invoice["amount_paise"]),
             "razorpay_key_id": config.RAZORPAY_KEY_ID,
-            # The form constrains what the validators already enforce. Passed in rather
-            # than written twice, so the input and the bound cannot drift apart.
-            "promise_horizon_days": MAX_PROMISE_HORIZON_DAYS,
+            # The form constrains what the validators already enforce, and the window is
+            # computed here rather than in the browser: the validator compares against this
+            # machine's clock, so a debtor in another timezone was offered a first or last
+            # day the server then refused.
+            "promise_min": date.today().isoformat(),
+            "promise_max": (date.today() + timedelta(days=MAX_PROMISE_HORIZON_DAYS)).isoformat(),
             "dispute_reason_max": DISPUTE_REASON_MAX,
         },
     )
