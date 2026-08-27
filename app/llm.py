@@ -96,7 +96,16 @@ def complete(
             )
             if retryable and index < len(chain) - 1:
                 continue
-            audit.record("llm.exhausted", chain=chain, failures=failures)
+            # Only a retryable failure on the last model has exhausted anything. A 400 or a
+            # 404 stops on the first model by design, and calling that "exhausted" told the
+            # audit log four models had been tried when none had. The log is the evidence
+            # for the failover story, so it has to say which of the two happened.
+            audit.record(
+                "llm.exhausted" if retryable else "llm.unrecoverable",
+                chain=chain,
+                failures=failures,
+                models_tried=index + 1,
+            )
             raise
 
         # An empty body is a failure, not an answer. Every call here passes a
@@ -109,7 +118,9 @@ def complete(
             failures.append(f"{model}:empty_response")
             if index < len(chain) - 1:
                 continue
-            audit.record("llm.exhausted", chain=chain, failures=failures)
+            audit.record(
+                "llm.exhausted", chain=chain, failures=failures, models_tried=index + 1
+            )
             raise RuntimeError(
                 f"every model in {chain} returned an empty response: {failures}"
             )
