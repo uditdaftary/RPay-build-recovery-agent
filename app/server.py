@@ -297,6 +297,7 @@ def raise_dispute(body: DisputeRequest) -> JSONResponse:
         "dispute.raised",
         invoice_id=invoice["invoice_id"],
         debtor=invoice["debtor"],
+        debtor_id=invoice["debtor_id"],
         reason=body.reason,
         escalation="halted",
         routed_to="human_review",
