@@ -75,6 +75,20 @@ def stub_llm(payload: str):
         llm.complete = original
 
 
+@contextmanager
+def forbid_llm(message: str):
+    """Fail the check if any decision path reaches the model at all."""
+    def _explode(prompt, **kwargs):
+        raise AssertionError(message)
+
+    original = llm.complete
+    llm.complete = _explode
+    try:
+        yield
+    finally:
+        llm.complete = original
+
+
 def _load_ledger() -> dict:
     assert LEDGER_PATH.exists(), f"{LEDGER_PATH} must exist; run `python -m app.ledger --seed 42 --write`"
     return json.loads(LEDGER_PATH.read_text(encoding="utf-8"))
@@ -755,15 +769,8 @@ def test_decision_made_has_one_shape() -> None:
 def test_limit_of_zero_evaluates_nobody() -> None:
     """limit=0 means nobody. Every debtor here would otherwise be a live model call."""
 
-    def _explode(prompt, **kwargs):
-        raise AssertionError("limit=0 must not reach the model")
-
-    original = llm.complete
-    llm.complete = _explode
-    try:
+    with forbid_llm("limit=0 must not reach the model"):
         assert run_strategist_batch(_load_ledger(), limit=0) == []
-    finally:
-        llm.complete = original
     print("ok  a limit of zero evaluates nobody")
 
 
@@ -776,20 +783,13 @@ def test_optout_suppression_needs_no_model() -> None:
     assert opted_out, "the seeded ledger must contain an opted-out debtor"
 
     for debtor in opted_out:
-        def _explode(prompt, **kwargs):
-            raise AssertionError("opted-out debtor must never reach the model")
-
-        original = llm.complete
-        llm.complete = _explode
-        try:
+        with forbid_llm("opted-out debtor must never reach the model"):
             decision = decide_for_debtor(
                 debtor,
                 grouped[debtor["debtor_id"]],
                 merchants[debtor["merchant_id"]],
                 history=NO_HISTORY,
             )
-        finally:
-            llm.complete = original
 
         assert decision.strategy == Strategy.WAIT
         assert decision.channel == "none"
