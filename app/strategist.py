@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 
 from app import audit, contact_history, llm
 from app.envelope import (
+    ALL_STRATEGIES,
     ASKS_FOR_MONEY,
     NO_HISTORY,
     ActionClass,
@@ -84,6 +85,30 @@ Core rules and principles:
 def _format_inr(paise: int) -> str:
     rupees = paise // 100
     return f"Rs {rupees:,}"
+
+
+def _usable_rejections(raw: Any, debtor_id: str) -> list[dict[str, Any]]:
+    """Keep the rejected alternatives that name a real strategy; drop and record the rest.
+
+    `rejected_actions` documents the model's reasoning and changes nothing the agent does,
+    but it is validated as part of the whole decision, so one unrecognised strategy in it
+    used to discard a sound strategy, ask and reasoning and fall the debtor back to a
+    handoff. It is also the field the prompt asks the model to free-form, which makes it
+    the likeliest in the schema to come back wrong. Dropped rather than fatal, and recorded
+    rather than swallowed, because a model inventing strategy names is worth knowing about.
+    """
+    if not isinstance(raw, list):
+        return []
+    kept: list[dict[str, Any]] = []
+    dropped: list[Any] = []
+    for entry in raw:
+        if isinstance(entry, dict) and entry.get("strategy") in ALL_STRATEGIES:
+            kept.append(entry)
+        else:
+            dropped.append(entry)
+    if dropped:
+        audit.record("strategist.rejection_discarded", debtor_id=debtor_id, dropped=dropped)
+    return kept
 
 
 def _record_decision(decision: StrategistDecision) -> None:
@@ -253,6 +278,7 @@ Return your structured decision according to the schema. Ensure strategy is one 
         # Ensure debtor fields are populated
         data["debtor_id"] = debtor_id
         data["debtor_name"] = debtor_name
+        data["rejected_actions"] = _usable_rejections(data.get("rejected_actions"), debtor_id)
         decision = StrategistDecision.model_validate(data)
     except Exception as exc:
         # A model that failed is not an agent that chose restraint. WAIT is this system's

@@ -707,6 +707,29 @@ def test_unusable_deadline_and_channel_are_refused() -> None:
     print("ok  unusable deadlines and unknown channels are refused")
 
 
+def test_bad_rejected_alternative_does_not_void_a_decision() -> None:
+    """A documentation field must not be able to discard a sound decision."""
+    debtor, invoices, merchant = _first_debtor_with_tds(_load_ledger())
+
+    payload = json.loads(_decision_payload("RECONCILE", None))
+    payload["reasoning"] = "Request Form 26AS to reconcile the TDS credit."
+    payload["confidence"] = 0.92
+    payload["rejected_actions"] = [
+        {"strategy": "SEND_LEGAL_NOTICE", "reason": "invented; not a member of Strategy"},
+        {"strategy": "ESCALATE", "reason": "the relationship is worth more than the balance"},
+    ]
+    with stub_llm(json.dumps(payload)):
+        decision = decide_for_debtor(debtor, invoices, merchant, history=NO_HISTORY)
+
+    assert decision.strategy == Strategy.RECONCILE, (
+        "an unrecognised rejected alternative voided a sound decision"
+    )
+    assert decision.confidence == 0.92, "the model's own confidence was replaced by a fallback"
+    kept = [r.strategy for r in decision.rejected_actions]
+    assert kept == [Strategy.ESCALATE], f"expected only the real strategy to survive, got {kept}"
+    print("ok  an unrecognised rejected alternative is dropped, not fatal")
+
+
 def test_no_contact_strategy_carries_no_channel() -> None:
     """WAIT and HUMAN_HANDOFF reach nobody, so neither may start a contact cooldown."""
     debtor, invoices, merchant = _first_debtor_with_tds(_load_ledger())
@@ -955,6 +978,7 @@ if __name__ == "__main__":
         test_tds_withheld_cannot_be_demanded_back()
         test_non_money_strategy_carries_no_ask()
         test_no_contact_strategy_carries_no_channel()
+        test_bad_rejected_alternative_does_not_void_a_decision()
         test_unusable_deadline_and_channel_are_refused()
         test_decision_made_has_one_shape()
         test_limit_of_zero_evaluates_nobody()
