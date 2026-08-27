@@ -334,8 +334,15 @@ Return your structured decision according to the schema. Ensure strategy is one 
             attempted_strategy=decision.strategy,
             permitted=envelope_summary["permitted_strategies"],
         )
-        # Force safe fallback
-        decision.strategy = Strategy.WAIT if Strategy.WAIT in envelope.permitted_strategies else Strategy.HUMAN_HANDOFF
+        # A model that reached for a prohibited action is the strongest case in the system
+        # for a human to look, which is what HUMAN_HANDOFF means. WAIT is never excluded by
+        # any rule, so the old `WAIT if permitted else HUMAN_HANDOFF` here could only ever
+        # pick WAIT and filed an attempted policy violation as the agent choosing restraint.
+        decision.strategy = (
+            Strategy.HUMAN_HANDOFF
+            if Strategy.HUMAN_HANDOFF in envelope.permitted_strategies
+            else Strategy.WAIT
+        )
         decision.reasoning = (
             f"Policy envelope intercepted prohibited action and defaulted to {decision.strategy}. "
             + decision.reasoning

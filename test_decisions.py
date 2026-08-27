@@ -550,6 +550,9 @@ def test_intercepted_violation_requires_review() -> None:
         decision = decide_for_debtor(debtor, invoices, merchant, history=NO_HISTORY)
 
     assert decision.strategy != Strategy.REQUEST_PAYMENT, "prohibited strategy survived"
+    assert decision.strategy == Strategy.HUMAN_HANDOFF, (
+        "an attempted policy violation was filed as WAIT, which this system reads as restraint"
+    )
     assert decision.review_required, "intercepted violation was not flagged for review"
 
     # Same for output the parser cannot read at all.
