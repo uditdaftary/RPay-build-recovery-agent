@@ -205,9 +205,9 @@ def decide_for_debtor(
             debtor_id=debtor_id,
             debtor_name=debtor_name,
             strategy=Strategy.WAIT,
-            channel="none",
-            language=debtor.get("language", "en"),
-            tone="neutral",
+            channel=Channel.NONE,
+            language=debtor.get("language", Language.EN),
+            tone=Tone.NEUTRAL,
             ask_amount_paise=0,
             reasoning=envelope.excluded_reasons.get(
                 Strategy.REQUEST_PAYMENT, "Debtor permanently opted out; suppression enforced."
@@ -323,9 +323,9 @@ Return your structured decision according to the schema. Ensure strategy is one 
             debtor_id=debtor_id,
             debtor_name=debtor_name,
             strategy=fallback_strategy,
-            channel="none",
-            language=debtor.get("language", "en"),
-            tone="neutral",
+            channel=Channel.NONE,
+            language=debtor.get("language", Language.EN),
+            tone=Tone.NEUTRAL,
             ask_amount_paise=0,
             reasoning=(
                 f"No model in the chain could be reached ({exc}); "
@@ -357,9 +357,9 @@ Return your structured decision according to the schema. Ensure strategy is one 
             debtor_id=debtor_id,
             debtor_name=debtor_name,
             strategy=fallback_strategy,
-            channel="none",
-            language=debtor.get("language", "en"),
-            tone="neutral",
+            channel=Channel.NONE,
+            language=debtor.get("language", Language.EN),
+            tone=Tone.NEUTRAL,
             ask_amount_paise=0,
             reasoning=f"LLM output parsing error ({exc}); fell back to {fallback_strategy.value}.",
             confidence=0.5,
