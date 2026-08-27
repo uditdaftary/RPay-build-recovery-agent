@@ -104,7 +104,6 @@ def complete(
                 "llm.exhausted" if retryable else "llm.unrecoverable",
                 chain=chain,
                 failures=failures,
-                models_tried=index + 1,
             )
             raise
 
@@ -118,9 +117,7 @@ def complete(
             failures.append(f"{model}:empty_response")
             if index < len(chain) - 1:
                 continue
-            audit.record(
-                "llm.exhausted", chain=chain, failures=failures, models_tried=index + 1
-            )
+            audit.record("llm.exhausted", chain=chain, failures=failures)
             raise RuntimeError(
                 f"every model in {chain} returned an empty response: {failures}"
             )
