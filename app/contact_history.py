@@ -19,7 +19,7 @@ touching a file.
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from app import audit
@@ -28,13 +28,24 @@ from app.envelope import Channel, DebtorHistory, Strategy
 logger = logging.getLogger(__name__)
 
 
+# The audit log stamps UTC; `as_of` and every date in the ledger is an Indian business
+# date, because the whole book is Indian receivables. Taking .date() off a UTC instant put
+# everything logged between local midnight and 05:30 on the *previous* business day, which
+# reported a contact as a day older than it was and lifted the cooldown a day early.
+# Pinned rather than read from the machine clock, so a run on a US-hosted box folds the
+# same way as a run in Bengaluru.
+BUSINESS_TZ = timezone(timedelta(hours=5, minutes=30))
+
+
 def _parse_date(raw: Any) -> date | None:
+    """Read a stamp as an Indian business date. Naive values are already local."""
     if not raw:
         return None
     try:
-        return datetime.fromisoformat(str(raw)).date()
+        parsed = datetime.fromisoformat(str(raw))
     except ValueError:
         return None
+    return (parsed.astimezone(BUSINESS_TZ) if parsed.tzinfo else parsed).date()
 
 
 def build(
