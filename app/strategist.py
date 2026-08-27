@@ -36,7 +36,7 @@ from app.envelope import (
     Tone,
     evaluate_envelope,
 )
-from app.ledger import agent_view
+from app.ledger import AS_OF, agent_view
 
 
 class RejectedAction(BaseModel):
@@ -114,7 +114,7 @@ def decide_for_debtor(
     invoices: list[dict[str, Any]],
     merchant: dict[str, Any],
     *,
-    as_of_date: str = "2026-08-26",
+    as_of_date: str = AS_OF.isoformat(),
     history: DebtorHistory | None = None,
 ) -> StrategistDecision:
     """Evaluate envelope and call the LLM to generate a recovery decision for a debtor."""
@@ -399,7 +399,7 @@ def run_strategist_batch(
     debtors = ledger["debtors"] if limit is None else ledger["debtors"][:limit]
     decisions: list[StrategistDecision] = []
 
-    as_of_date = ledger.get("as_of", "2026-08-26")
+    as_of_date = ledger.get("as_of", AS_OF.isoformat())
     # Folded once for the whole batch rather than re-read per debtor.
     histories = contact_history.build(date.fromisoformat(as_of_date))
 
