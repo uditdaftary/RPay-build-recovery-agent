@@ -255,8 +255,17 @@ Return your structured decision according to the schema. Ensure strategy is one 
         data["debtor_name"] = debtor_name
         decision = StrategistDecision.model_validate(data)
     except Exception as exc:
-        # If response parsing fails, fallback to safe strategy
-        fallback_strategy = Strategy.WAIT if Strategy.WAIT in envelope.permitted_strategies else Strategy.HUMAN_HANDOFF
+        # A model that failed is not an agent that chose restraint. WAIT is this system's
+        # word for judgment and it is never excluded by any rule, so the old
+        # `WAIT if permitted else HUMAN_HANDOFF` always resolved to WAIT and filed every
+        # outage as restraint — straight into the WAIT share the results page reports.
+        # HUMAN_HANDOFF is REVIEW_REQUIRED, no rule outside the opt-out fast path excludes
+        # it, and it is the honest answer: nobody has decided this one yet.
+        fallback_strategy = (
+            Strategy.HUMAN_HANDOFF
+            if Strategy.HUMAN_HANDOFF in envelope.permitted_strategies
+            else Strategy.WAIT
+        )
         audit.record(
             "strategist.parse_failed",
             debtor_id=debtor_id,

@@ -556,6 +556,9 @@ def test_intercepted_violation_requires_review() -> None:
     with stub_llm("not json at all"):
         fallback = decide_for_debtor(debtor, invoices, merchant, history=NO_HISTORY)
     assert fallback.review_required, "parse failure was not flagged for review"
+    assert fallback.strategy == Strategy.HUMAN_HANDOFF, (
+        "a model failure was filed as WAIT, which this system reads as deliberate restraint"
+    )
     print("ok  intercepted violations and parse failures stay flagged for review")
 
 
