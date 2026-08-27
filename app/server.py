@@ -62,8 +62,19 @@ def rejected_input(request: Request, exc: RequestValidationError) -> JSONRespons
     422" - the one surface in this system a debtor actually sees. One handler rather than
     a try/except per endpoint, because the mismatch is in the contract, not the route.
     """
-    first = exc.errors()[0] if exc.errors() else {}
+    errors = exc.errors()
+    first = errors[0] if errors else {}
     message = str(first.get("msg", "That value was not accepted."))
+    # Recorded, not only answered. The promise horizon is what stops one request from
+    # suppressing an account indefinitely, so an attempt on it belongs in the log beside
+    # order.rejected and webhook.signature_mismatch. Every field is named, not just the
+    # one the debtor is shown, because repeated probing is the pattern worth seeing.
+    audit.record(
+        "request.rejected",
+        path=request.url.path,
+        fields=[".".join(str(part) for part in error.get("loc", ())) for error in errors],
+        messages=[str(error.get("msg", "")) for error in errors],
+    )
     # Pydantic prefixes its own validators; the debtor does not need the machinery.
     return JSONResponse({"error": message.removeprefix("Value error, ")}, status_code=422)
 
