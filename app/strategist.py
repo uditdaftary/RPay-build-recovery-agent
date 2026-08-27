@@ -29,6 +29,7 @@ from app.envelope import (
     ActionClass,
     Channel,
     DebtorHistory,
+    NO_CONTACT_STRATEGIES,
     EnvelopeResult,
     Language,
     Strategy,
@@ -333,6 +334,25 @@ Return your structured decision according to the schema. Ensure strategy is one 
             f"{decision.strategy.value} decision, which asks for no money. " + decision.reasoning
         )
         decision.ask_amount_paise = 0
+        decision.review_required = True
+
+    # A strategy that reaches nobody must not carry a delivery channel. `contact_history`
+    # reads any channel other than NONE on a `decision.made` row as outreach, so a WAIT
+    # left holding "email" starts the debtor's cooldown and suppresses the next seven days
+    # of chasing on the strength of a message that was never sent. That inverts the point
+    # of WAIT: restraint would silence the account instead of leaving it available.
+    if decision.strategy in NO_CONTACT_STRATEGIES and decision.channel != Channel.NONE:
+        audit.record(
+            "envelope.channel_on_no_contact_strategy",
+            debtor_id=debtor_id,
+            strategy=decision.strategy,
+            attempted_channel=decision.channel,
+        )
+        decision.reasoning = (
+            f"Policy envelope dropped a {decision.channel.value} channel from a "
+            f"{decision.strategy.value} decision, which contacts nobody. " + decision.reasoning
+        )
+        decision.channel = Channel.NONE
         decision.review_required = True
 
     # A deadline the promise tracker cannot act on is worse than none: it would be logged

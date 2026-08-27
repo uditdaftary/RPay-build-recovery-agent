@@ -81,6 +81,12 @@ ASKS_FOR_MONEY = frozenset(
     }
 )
 
+# Strategies that reach nobody outside the merchant. WAIT is restraint and HUMAN_HANDOFF
+# routes to a colleague, so neither may carry a delivery channel: `contact_history` reads
+# any channel other than NONE on a `decision.made` row as outreach, and a decision *not* to
+# write to a debtor must not start that debtor's contact cooldown.
+NO_CONTACT_STRATEGIES = frozenset({Strategy.WAIT, Strategy.HUMAN_HANDOFF})
+
 
 @dataclass(frozen=True)
 class DebtorHistory:

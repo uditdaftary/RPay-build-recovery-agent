@@ -32,8 +32,10 @@ from app.baseline import decide_baseline, rung_for_days, run_baseline_batch
 from app.contact_history import build as build_contact_history
 from app.envelope import (
     ASKS_FOR_MONEY,
+    NO_CONTACT_STRATEGIES,
     NO_HISTORY,
     ActionClass,
+    Channel,
     Strategy,
     evaluate_envelope,
 )
@@ -688,6 +690,32 @@ def test_unusable_deadline_and_channel_are_refused() -> None:
     print("ok  unusable deadlines and unknown channels are refused")
 
 
+def test_no_contact_strategy_carries_no_channel() -> None:
+    """WAIT and HUMAN_HANDOFF reach nobody, so neither may start a contact cooldown."""
+    debtor, invoices, merchant = _first_debtor_with_tds(_load_ledger())
+
+    for strategy in sorted(NO_CONTACT_STRATEGIES):
+        with stub_llm(_decision_payload(strategy.value, None, channel="email")):
+            decision = decide_for_debtor(debtor, invoices, merchant, history=NO_HISTORY)
+        assert decision.strategy == strategy, f"{strategy} was not the decision under test"
+        assert decision.channel == Channel.NONE, f"{strategy} kept a delivery channel"
+        assert decision.review_required, f"stray channel on {strategy} was not flagged"
+
+    # The reason the channel matters: contact_history reads a channel as outreach, and the
+    # envelope reads recent outreach as a reason to stop chasing. A WAIT that kept "email"
+    # would suppress the account for the whole cooldown on a message never sent.
+    as_of = date(2026, 8, 26)
+    silenced = build_contact_history(
+        as_of,
+        [{"ts": "2026-08-25T10:00:00+00:00", "event": "decision.made",
+          "debtor_id": "DEB-WAIT", "strategy": "WAIT", "channel": Channel.NONE}],
+    )
+    assert silenced.get("DEB-WAIT", NO_HISTORY).days_since_last_contact is None, (
+        "a WAIT with no channel still started a cooldown"
+    )
+    print("ok  a strategy that contacts nobody carries no channel")
+
+
 def test_decision_made_has_one_shape() -> None:
     """Both decision paths write the same `decision.made` keys, for the metrics page."""
     ledger = _load_ledger()
@@ -923,6 +951,7 @@ if __name__ == "__main__":
         test_ask_is_clamped_into_the_authorised_band()
         test_tds_withheld_cannot_be_demanded_back()
         test_non_money_strategy_carries_no_ask()
+        test_no_contact_strategy_carries_no_channel()
         test_unusable_deadline_and_channel_are_refused()
         test_decision_made_has_one_shape()
         test_limit_of_zero_evaluates_nobody()
