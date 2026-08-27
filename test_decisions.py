@@ -785,6 +785,29 @@ def test_bad_rejected_alternative_does_not_void_a_decision() -> None:
     print("ok  an unusable rejected alternative is dropped, not fatal")
 
 
+def test_unreachable_model_does_not_end_the_batch() -> None:
+    """One exhausted chain routes that debtor to a human; the rest of the book still runs."""
+    ledger = _load_ledger()
+
+    def _exhausted(prompt, **kwargs):
+        raise RuntimeError("every model in the chain returned an empty response")
+
+    original = llm.complete
+    llm.complete = _exhausted
+    try:
+        decisions = run_strategist_batch(ledger, limit=3)
+    finally:
+        llm.complete = original
+
+    assert len(decisions) == 3, f"an unreachable model discarded the batch, got {len(decisions)}"
+    for decision in decisions:
+        assert decision.review_required, "a model failure was not flagged for review"
+        assert decision.strategy in NO_CONTACT_STRATEGIES, (
+            f"{decision.strategy} was sent to a debtor on a decision no model made"
+        )
+    print("ok  an unreachable model chain does not discard the batch")
+
+
 def test_no_contact_strategy_carries_no_delivery_fields() -> None:
     """WAIT and HUMAN_HANDOFF reach nobody: no channel, no deadline, no cooldown."""
     debtor, invoices, merchant = _first_debtor_with_tds(_load_ledger())
@@ -1056,6 +1079,7 @@ if __name__ == "__main__":
         test_tds_withheld_cannot_be_demanded_back()
         test_non_money_strategy_carries_no_ask()
         test_no_contact_strategy_carries_no_delivery_fields()
+        test_unreachable_model_does_not_end_the_batch()
         test_bad_rejected_alternative_does_not_void_a_decision()
         test_unusable_deadline_and_channel_are_refused()
         test_decision_made_has_one_shape()

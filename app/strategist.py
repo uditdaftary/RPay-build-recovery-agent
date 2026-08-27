@@ -299,12 +299,44 @@ HARD POLICY ENVELOPE (STRICT BOUNDARIES):
 Return your structured decision according to the schema. Ensure strategy is one of: {envelope_summary['permitted_strategies']}.
 """
 
-    raw_json = llm.complete(
-        user_prompt,
-        system=SYSTEM_PROMPT,
-        response_schema=StrategistDecision,
-        temperature=0.1,
-    )
+    # An unreachable model chain must not take the rest of the book with it. llm.complete
+    # raises once every model has failed, and this call sat outside the try, so one
+    # exhaustion at the tenth debtor discarded the nine decisions already made. Still loud:
+    # the failure is recorded under its own event and the debtor lands on a human, rather
+    # than being quietly filed as a decision nobody made.
+    try:
+        raw_json = llm.complete(
+            user_prompt,
+            system=SYSTEM_PROMPT,
+            response_schema=StrategistDecision,
+            temperature=0.1,
+        )
+    except Exception as exc:
+        fallback_strategy = _safe_fallback(envelope)
+        audit.record(
+            "strategist.model_unavailable",
+            debtor_id=debtor_id,
+            error=str(exc),
+            fell_back_to=fallback_strategy,
+        )
+        decision = StrategistDecision(
+            debtor_id=debtor_id,
+            debtor_name=debtor_name,
+            strategy=fallback_strategy,
+            channel="none",
+            language=debtor.get("language", "en"),
+            tone="neutral",
+            ask_amount_paise=0,
+            reasoning=(
+                f"No model in the chain could be reached ({exc}); "
+                f"routed to {fallback_strategy.value} for a human."
+            ),
+            confidence=0.0,
+            review_required=True,
+            action_class=ActionClass.REVIEW_REQUIRED,
+        )
+        _record_decision(decision)
+        return decision
 
     try:
         data = json.loads(raw_json)
