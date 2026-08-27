@@ -89,11 +89,12 @@ def complete(
         except (errors.APIError, httpx.TimeoutException, httpx.TransportError) as exc:
             # A client-side read timeout is not an APIError and would otherwise skip the
             # whole chain, which is the failure this fallback exists to survive.
-            status = getattr(exc, "code", None) or type(exc).__name__
+            status_code = getattr(exc, "code", None)
+            status = status_code if isinstance(status_code, int) else type(exc).__name__
             failures.append(f"{model}:{status}")
-            retryable = status in RETRYABLE_STATUS or isinstance(
-                exc, httpx.TimeoutException | httpx.TransportError
-            )
+            retryable = (
+                isinstance(status_code, int) and status_code in RETRYABLE_STATUS
+            ) or isinstance(exc, httpx.TimeoutException | httpx.TransportError)
             if retryable and index < len(chain) - 1:
                 continue
             # Only a retryable failure on the last model has exhausted anything. A 400 or a
