@@ -86,6 +86,15 @@ merchant can invoke the statute, and that the hidden behaviour parameters never 
 agent's view.
 
 ```bash
+python -m ruff check .
+```
+
+Lint. Tests were the only gate this project had, so every "checks pass" claim covered one
+of three. The rule set is deliberately narrow: unused and undefined names, import order,
+bugbear, and `DTZ`, which flags a naive datetime — the class of bug that already cost this
+codebase a day-early cooldown.
+
+```bash
 python test_decisions.py
 ```
 
