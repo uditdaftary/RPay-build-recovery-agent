@@ -18,11 +18,14 @@ touching a file.
 
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime
 from typing import Any
 
 from app import audit
 from app.envelope import Channel, DebtorHistory, Strategy
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_date(raw: Any) -> date | None:
@@ -99,16 +102,20 @@ def build(
             # already performs on the ladder, applied to the envelope's view of it.
             promises.pop(debtor_id, None)
 
-    # One summary per fold, not one row per bad row. The log is append-only and this
-    # function reads it on every decision, so recording per row would make a single corrupt
-    # entry grow the file every time it is read.
+    # Warned, never recorded. This function reads the audit log on every decision, so an
+    # audit.record here would append a row to the very file being folded — one new row per
+    # read, for as long as the bad row exists, in a file that is itself an input to the
+    # envelope. Malformed rows are a defect in whatever wrote them, and the warning belongs
+    # where defects go rather than in the evaluation artifact.
     if undated:
-        audit.record("contact_history.undated_events_skipped", count=undated, as_of=as_of.isoformat())
+        logger.warning(
+            "contact history skipped %d undated event(s) as of %s", undated, as_of.isoformat()
+        )
     if unparsable_promise_dates:
-        audit.record(
-            "contact_history.unparsable_promise_dates",
-            count=len(unparsable_promise_dates),
-            sample=unparsable_promise_dates[:3],
+        logger.warning(
+            "contact history skipped %d unparsable promise date(s), e.g. %s",
+            len(unparsable_promise_dates),
+            unparsable_promise_dates[:3],
         )
 
     histories: dict[str, DebtorHistory] = {}
