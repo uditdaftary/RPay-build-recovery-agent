@@ -101,6 +101,10 @@ def _usable_rejections(raw: Any, debtor_id: str) -> list[dict[str, Any]]:
     decision. The model that defines a valid entry is the only thing that knows what one is.
     """
     if not isinstance(raw, list):
+        # Includes the absent and null cases. The prompt requires 1-2 rejected alternatives
+        # and the audit export is meant to carry them, so a field that arrives in no usable
+        # shape at all is recorded rather than quietly replaced with an empty list.
+        audit.record("strategist.rejection_discarded", debtor_id=debtor_id, dropped=raw)
         return []
     kept: list[dict[str, Any]] = []
     dropped: list[Any] = []

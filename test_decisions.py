@@ -733,6 +733,8 @@ def test_bad_rejected_alternative_does_not_void_a_decision() -> None:
     # the prompt asks the model to free-form both keys.
     for label, rejected in (
         ("a real strategy with no reason", [{"strategy": "ESCALATE"}]),
+        ("a null field", None),
+        ("prose where a list belongs", "I rejected ESCALATE"),
     ):
         payload["rejected_actions"] = rejected
         with stub_llm(json.dumps(payload)):
