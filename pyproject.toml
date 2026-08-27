@@ -16,7 +16,9 @@ select = [
     "DTZ",  # naive datetimes, which this codebase has already been bitten by
 ]
 ignore = [
-    "E501",  # line length is reported by the formatter, not worth failing a build over
+    "E501",   # line length is reported by the formatter, not worth failing a build over
+    "SIM108", # a ternary is not always the clearer branch, and this codebase leans on
+              # commented if/else in the statutory date arithmetic
 ]
 
 [tool.ruff.lint.per-file-ignores]

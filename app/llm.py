@@ -92,7 +92,7 @@ def complete(
             status = getattr(exc, "code", None) or type(exc).__name__
             failures.append(f"{model}:{status}")
             retryable = status in RETRYABLE_STATUS or isinstance(
-                exc, (httpx.TimeoutException, httpx.TransportError)
+                exc, httpx.TimeoutException | httpx.TransportError
             )
             if retryable and index < len(chain) - 1:
                 continue
