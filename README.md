@@ -180,9 +180,14 @@ no other module imports `google.genai`.
 Primary is `gemini-3.6-flash`. Every model that answered returned the same verdict on the
 same prompt, so the fallback chain changes
 whether a decision arrives, not what it is. Calls fail over across the chain on a bounded
-clock and `llm.failover` is written to the audit log naming the model that answered. A
-client-side read timeout is not an `APIError`, so it is caught explicitly; without that it
-would bypass the chain entirely, which is the exact failure the chain exists to survive.
+clock and `llm.failover` is written to the audit log naming the model that answered.
+
+Two failures bypass a naive chain, and both are handled here because both were seen. A
+client-side read timeout is not an `APIError`, so it is caught explicitly. And a model can
+answer with no text at all when a candidate is blocked, stopped on safety or truncated:
+no exception is raised, so an empty body was returned as though it were an answer and the
+chain never fired. Ten of the first 146 decisions took that path and were recorded as the
+agent choosing to wait. An empty body is now a failure that moves to the next model.
 
 **The ledger separates what the agent sees from what is true.** Each debtor carries hidden
 behaviour parameters fixed by the seed. `Debtor.agent_view()` is the only projection the
