@@ -7,11 +7,14 @@ the actions the agent considered and rejected.
 """
 
 import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from app.config import PROJECT_ROOT
+
+logger = logging.getLogger(__name__)
 
 AUDIT_DIR = PROJECT_ROOT / "audit"
 EVENT_LOG = AUDIT_DIR / "events.jsonl"
@@ -31,8 +34,24 @@ def record(event: str, **fields: Any) -> dict[str, Any]:
 
 
 def read_all() -> list[dict[str, Any]]:
-    """Read the log back, for the metrics page and for export."""
+    """Read the log back, for the metrics page and for export.
+
+    A row that will not parse is skipped, not fatal. A process killed mid-append leaves a
+    truncated final line, and this log is now an input to the envelope rather than only a
+    record of it, so one bad row must not make every subsequent decision impossible.
+
+    The skip is warned about rather than recorded: writing into the file being read would
+    grow it on every read, and the reader is on the decision path.
+    """
     if not EVENT_LOG.exists():
         return []
+    events: list[dict[str, Any]] = []
     with EVENT_LOG.open(encoding="utf-8") as handle:
-        return [json.loads(line) for line in handle if line.strip()]
+        for number, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            try:
+                events.append(json.loads(line))
+            except json.JSONDecodeError as exc:
+                logger.warning("skipping unparsable audit row %d in %s: %s", number, EVENT_LOG, exc)
+    return events
