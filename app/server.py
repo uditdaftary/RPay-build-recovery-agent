@@ -13,13 +13,13 @@ webhook is what tells the *system*, and it is the only one that arrives when the
 closes the tab mid-redirect. Suppression therefore hangs off the webhook alone.
 """
 
-from datetime import date
+from datetime import date, timedelta
 
 import razorpay
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app import audit, config, razorpay_gateway
 from app.config import PROJECT_ROOT
@@ -249,10 +249,37 @@ async def razorpay_webhook(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True})
 
 
+# A promise is no longer only a record. `contact_history` folds `promise.made` into
+# DebtorHistory and the envelope excludes every money ask while the promise has not fallen
+# due, so this endpoint writes a control input for the decision engine. It is public and
+# unauthenticated, which makes an unbounded date a way to switch recovery off: one request
+# naming a date in 2099 suppressed the account permanently. Ninety days is longer than any
+# commercial payment term this product targets.
+MAX_PROMISE_HORIZON_DAYS = 90
+
+# One crore. Above this the figure is a typo or an attack, not a commitment, and it is
+# rendered into the envelope's own exclusion reasoning.
+MAX_PROMISE_PAISE = 1_00_00_000_00
+
+
 class PromiseRequest(BaseModel):
     token: str
     promised_date: date
-    promised_amount_paise: int | None = None
+    promised_amount_paise: int | None = Field(default=None, gt=0, le=MAX_PROMISE_PAISE)
+
+    @field_validator("promised_date")
+    @classmethod
+    def _within_horizon(cls, value: date) -> date:
+        # The wall clock, not the ledger's as_of: a debtor filling this in is committing in
+        # real time, whatever fixed date the seeded experiment is pinned to.
+        today = date.today()
+        if value < today:
+            raise ValueError("promised date is in the past")
+        if value > today + timedelta(days=MAX_PROMISE_HORIZON_DAYS):
+            raise ValueError(
+                f"promised date is more than {MAX_PROMISE_HORIZON_DAYS} days away"
+            )
+        return value
 
 
 @app.post("/api/promise")
