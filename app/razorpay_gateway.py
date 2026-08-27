@@ -49,7 +49,7 @@ def verify_payment_signature(order_id: str, payment_id: str, signature: str) -> 
     """Verify the checkout success callback."""
     if not (order_id and payment_id and signature):
         return False
-    message = f"{order_id}|{payment_id}".encode("utf-8")
+    message = f"{order_id}|{payment_id}".encode()
     return _signature_matches(message, config.RAZORPAY_KEY_SECRET, signature)
 
 

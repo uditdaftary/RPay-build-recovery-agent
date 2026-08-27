@@ -28,7 +28,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from app import audit, llm
-from app.baseline import decide_baseline, rung_for_days, run_baseline_batch
+from app.baseline import decide_baseline, run_baseline_batch, rung_for_days
 from app.contact_history import build as build_contact_history
 from app.envelope import (
     ASKS_FOR_MONEY,
@@ -370,9 +370,8 @@ def test_promise_horizon_bounds_the_suppression_window() -> None:
     DebtorHistory and the envelope holds off for as long as the promise has not fallen due,
     on a public endpoint. Without a ceiling one request suppresses an account indefinitely.
     """
-    from pydantic import ValidationError
-
     from fastapi.testclient import TestClient
+    from pydantic import ValidationError
 
     from app.server import MAX_PROMISE_HORIZON_DAYS, PromiseRequest, app
 

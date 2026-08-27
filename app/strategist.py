@@ -25,11 +25,11 @@ from pydantic import BaseModel, Field, ValidationError
 from app import audit, contact_history, llm
 from app.envelope import (
     ASKS_FOR_MONEY,
+    NO_CONTACT_STRATEGIES,
     NO_HISTORY,
     ActionClass,
     Channel,
     DebtorHistory,
-    NO_CONTACT_STRATEGIES,
     EnvelopeResult,
     Language,
     Strategy,

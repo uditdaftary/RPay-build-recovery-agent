@@ -8,8 +8,7 @@ the actions the agent considered and rejected.
 
 import json
 import logging
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import UTC, datetime
 from typing import Any
 
 from app.config import PROJECT_ROOT
@@ -23,7 +22,7 @@ EVENT_LOG = AUDIT_DIR / "events.jsonl"
 def record(event: str, **fields: Any) -> dict[str, Any]:
     """Append one event and return it. Never raises on serialisation of odd values."""
     entry = {
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "event": event,
         **fields,
     }
