@@ -86,6 +86,25 @@ def _format_inr(paise: int) -> str:
     return f"Rs {rupees:,}"
 
 
+def _safe_fallback(envelope: EnvelopeResult) -> Strategy:
+    """Where a decision lands when the model could not supply one.
+
+    HUMAN_HANDOFF rather than WAIT: WAIT is this system's word for judgment, so filing a
+    failure as WAIT reports an outage as restraint. No rule outside the opt-out fast path
+    excludes HUMAN_HANDOFF, and that path returns before any of this runs, but the envelope
+    is the authority on what is permitted and this does not assume its own reachability.
+
+    One function because there are three ways to arrive here - an unreadable response, an
+    unreachable model, and an intercepted violation - and when this was written out at each
+    of them, fixing one site left the others behind for a full round.
+    """
+    return (
+        Strategy.HUMAN_HANDOFF
+        if Strategy.HUMAN_HANDOFF in envelope.permitted_strategies
+        else Strategy.WAIT
+    )
+
+
 def _usable_rejections(raw: Any, debtor_id: str) -> list[dict[str, Any]]:
     """Keep the rejected alternatives that validate; drop and record the rest.
 
@@ -295,17 +314,7 @@ Return your structured decision according to the schema. Ensure strategy is one 
         data["rejected_actions"] = _usable_rejections(data.get("rejected_actions"), debtor_id)
         decision = StrategistDecision.model_validate(data)
     except Exception as exc:
-        # A model that failed is not an agent that chose restraint. WAIT is this system's
-        # word for judgment and it is never excluded by any rule, so the old
-        # `WAIT if permitted else HUMAN_HANDOFF` always resolved to WAIT and filed every
-        # outage as restraint — straight into the WAIT share the results page reports.
-        # HUMAN_HANDOFF is REVIEW_REQUIRED, no rule outside the opt-out fast path excludes
-        # it, and it is the honest answer: nobody has decided this one yet.
-        fallback_strategy = (
-            Strategy.HUMAN_HANDOFF
-            if Strategy.HUMAN_HANDOFF in envelope.permitted_strategies
-            else Strategy.WAIT
-        )
+        fallback_strategy = _safe_fallback(envelope)
         audit.record(
             "strategist.parse_failed",
             debtor_id=debtor_id,
@@ -334,15 +343,9 @@ Return your structured decision according to the schema. Ensure strategy is one 
             attempted_strategy=decision.strategy,
             permitted=envelope_summary["permitted_strategies"],
         )
-        # A model that reached for a prohibited action is the strongest case in the system
-        # for a human to look, which is what HUMAN_HANDOFF means. WAIT is never excluded by
-        # any rule, so the old `WAIT if permitted else HUMAN_HANDOFF` here could only ever
-        # pick WAIT and filed an attempted policy violation as the agent choosing restraint.
-        decision.strategy = (
-            Strategy.HUMAN_HANDOFF
-            if Strategy.HUMAN_HANDOFF in envelope.permitted_strategies
-            else Strategy.WAIT
-        )
+        # A model reaching for a prohibited action is the strongest case in this system for
+        # a human to look, which is what the safe fallback means.
+        decision.strategy = _safe_fallback(envelope)
         decision.reasoning = (
             f"Policy envelope intercepted prohibited action and defaulted to {decision.strategy}. "
             + decision.reasoning
