@@ -65,6 +65,10 @@ def complete(
 
     Passing `response_schema` constrains the model to JSON matching that schema, which is
     how the recovery strategist returns a decision object rather than prose.
+
+    Never returns an empty string. A model that answers with nothing has failed, and the
+    caller cannot tell that apart from a model that answered badly, so the failover is
+    made here rather than guessed at upstream.
     """
     generation_config = types.GenerateContentConfig(
         system_instruction=system,
@@ -95,13 +99,28 @@ def complete(
             audit.record("llm.exhausted", chain=chain, failures=failures)
             raise
 
+        # An empty body is a failure, not an answer. Every call here passes a
+        # response_schema, so no request has "no text" as its correct reply: a blocked
+        # candidate, a safety stop and a truncated stream all arrive as response.text of
+        # None, with no exception raised. Returning "" handed the caller something only it
+        # could misinterpret, and the chain that exists for exactly this never fired.
+        text = response.text or ""
+        if not text.strip():
+            failures.append(f"{model}:empty_response")
+            if index < len(chain) - 1:
+                continue
+            audit.record("llm.exhausted", chain=chain, failures=failures)
+            raise RuntimeError(
+                f"every model in {chain} returned an empty response: {failures}"
+            )
+
         if index > 0:
             # Evidence for the failure-recovery story: the agent kept working through a
             # provider outage rather than stalling.
             audit.record(
                 "llm.failover", served_by=model, skipped=failures, primary=chain[0]
             )
-        return response.text or ""
+        return text
 
     raise RuntimeError(f"no model in {chain} could be reached")
 
