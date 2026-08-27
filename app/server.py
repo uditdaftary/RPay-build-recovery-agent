@@ -17,6 +17,7 @@ from datetime import date, timedelta
 
 import razorpay
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, field_validator
@@ -49,6 +50,22 @@ DEMO_INVOICES: dict[str, dict] = {
         "status": "OVERDUE",
     },
 }
+
+
+@app.exception_handler(RequestValidationError)
+def rejected_input(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """Answer a rejected request in the shape the resolution page already reads.
+
+    FastAPI's default is 422 with a `detail` list, but every hand-written failure here
+    returns `{"error": ...}` and the page renders that. Bounding the promise date and the
+    dispute length therefore started showing debtors a raw "Request failed with status
+    422" - the one surface in this system a debtor actually sees. One handler rather than
+    a try/except per endpoint, because the mismatch is in the contract, not the route.
+    """
+    first = exc.errors()[0] if exc.errors() else {}
+    message = str(first.get("msg", "That value was not accepted."))
+    # Pydantic prefixes its own validators; the debtor does not need the machinery.
+    return JSONResponse({"error": message.removeprefix("Value error, ")}, status_code=422)
 
 
 def format_inr(paise: int) -> str:
