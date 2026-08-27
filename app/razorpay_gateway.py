@@ -47,6 +47,10 @@ def _signature_matches(message: bytes, secret: str, provided: str) -> bool:
 
 def verify_payment_signature(order_id: str, payment_id: str, signature: str) -> bool:
     """Verify the checkout success callback."""
+    if not config.RAZORPAY_KEY_SECRET:
+        raise RuntimeError(
+            "RAZORPAY_KEY_SECRET is not set. Copy .env.example to .env and fill it in."
+        )
     if not (order_id and payment_id and signature):
         return False
     message = f"{order_id}|{payment_id}".encode()
