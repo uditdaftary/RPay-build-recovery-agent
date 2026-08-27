@@ -24,7 +24,7 @@ import json
 import os
 import tempfile
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 from app import audit, llm
@@ -361,6 +361,44 @@ def test_envelope_active_promise() -> None:
     )
     assert settled.get("DEB-HIST", NO_HISTORY).active_promise_date is None
     print("ok  envelope holds off inside an open promise, resumes on a broken one")
+
+
+def test_promise_horizon_bounds_the_suppression_window() -> None:
+    """An open promise excludes every money ask, so the date a debtor may name is bounded.
+
+    This is the control, not a nicety: `contact_history` folds `promise.made` into
+    DebtorHistory and the envelope holds off for as long as the promise has not fallen due,
+    on a public endpoint. Without a ceiling one request suppresses an account indefinitely.
+    """
+    from pydantic import ValidationError
+
+    from fastapi.testclient import TestClient
+
+    from app.server import MAX_PROMISE_HORIZON_DAYS, PromiseRequest, app
+
+    today = date.today()
+    inside = PromiseRequest(token="tok_demo1", promised_date=today + timedelta(days=7))
+    assert inside.promised_date == today + timedelta(days=7), "a normal promise was altered"
+
+    for label, kwargs in (
+        ("past the horizon", {"promised_date": today + timedelta(days=MAX_PROMISE_HORIZON_DAYS + 1)}),
+        ("already gone", {"promised_date": today - timedelta(days=1)}),
+        ("a negative amount", {"promised_date": today + timedelta(days=7), "promised_amount_paise": -1}),
+    ):
+        try:
+            PromiseRequest(token="tok_demo1", **kwargs)
+        except ValidationError:
+            continue
+        raise AssertionError(f"{label} was accepted; recovery can be suppressed indefinitely")
+
+    # And the refusal has to be readable, because the resolution page is the one surface a
+    # debtor sees. FastAPI's own 422 body would render there as a bare status code.
+    rejected = TestClient(app).post(
+        "/api/promise", json={"token": "tok_demo1", "promised_date": "2099-01-01"}
+    )
+    assert rejected.status_code == 422
+    assert "error" in rejected.json(), f"page cannot read the refusal: {rejected.json()}"
+    print("ok  a debtor cannot promise past the suppression horizon")
 
 
 def test_baseline_policy() -> None:
@@ -1028,6 +1066,7 @@ if __name__ == "__main__":
         test_history_reads_a_missing_channel_as_silence()
         test_envelope_max_intensity()
         test_envelope_active_promise()
+        test_promise_horizon_bounds_the_suppression_window()
         test_baseline_policy()
         test_baseline_ladder_and_its_collapse()
         print("\nall decision tests passed")
