@@ -57,9 +57,12 @@ def build(
     """Fold the audit log into per-debtor history as at `as_of`.
 
     `events` is injectable so the guardrails can be checked against a hand-built log
-    without writing files. Passing None reads the real one. `only_debtor` narrows the fold
-    to one debtor, for the single-decision path that would otherwise pay to fold the whole
-    book and then discard all but one entry.
+    without writing files. Passing None reads the real one.
+
+    `only_debtor` narrows the fold, not the read: the whole log is still parsed, because a
+    JSONL file cannot be seeked by debtor. It saves the folding, not the I/O, so a caller
+    deciding for many debtors must build the map once and pass it in rather than calling
+    this per debtor. `run_strategist_batch` does exactly that.
     """
     if events is None:
         events = audit.read_all()
