@@ -727,7 +727,19 @@ def test_bad_rejected_alternative_does_not_void_a_decision() -> None:
     assert decision.confidence == 0.92, "the model's own confidence was replaced by a fallback"
     kept = [r.strategy for r in decision.rejected_actions]
     assert kept == [Strategy.ESCALATE], f"expected only the real strategy to survive, got {kept}"
-    print("ok  an unrecognised rejected alternative is dropped, not fatal")
+
+    # Every way the field can be unusable, not just the one that was found first. A real
+    # strategy with no `reason` fails RejectedAction just as hard as an invented name, and
+    # the prompt asks the model to free-form both keys.
+    for label, rejected in (
+        ("a real strategy with no reason", [{"strategy": "ESCALATE"}]),
+    ):
+        payload["rejected_actions"] = rejected
+        with stub_llm(json.dumps(payload)):
+            survived = decide_for_debtor(debtor, invoices, merchant, history=NO_HISTORY)
+        assert survived.strategy == Strategy.RECONCILE, f"{label} voided the decision"
+        assert survived.confidence == 0.92, f"{label} replaced the model's confidence"
+    print("ok  an unusable rejected alternative is dropped, not fatal")
 
 
 def test_no_contact_strategy_carries_no_delivery_fields() -> None:

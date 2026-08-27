@@ -20,11 +20,10 @@ import json
 from datetime import date
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from app import audit, contact_history, llm
 from app.envelope import (
-    ALL_STRATEGIES,
     ASKS_FOR_MONEY,
     NO_HISTORY,
     ActionClass,
@@ -88,24 +87,30 @@ def _format_inr(paise: int) -> str:
 
 
 def _usable_rejections(raw: Any, debtor_id: str) -> list[dict[str, Any]]:
-    """Keep the rejected alternatives that name a real strategy; drop and record the rest.
+    """Keep the rejected alternatives that validate; drop and record the rest.
 
     `rejected_actions` documents the model's reasoning and changes nothing the agent does,
-    but it is validated as part of the whole decision, so one unrecognised strategy in it
-    used to discard a sound strategy, ask and reasoning and fall the debtor back to a
-    handoff. It is also the field the prompt asks the model to free-form, which makes it
-    the likeliest in the schema to come back wrong. Dropped rather than fatal, and recorded
-    rather than swallowed, because a model inventing strategy names is worth knowing about.
+    but it is validated as part of the whole decision, so one bad entry used to discard a
+    sound strategy, ask and reasoning and fall the debtor back to a handoff. It is also the
+    field the prompt asks the model to free-form, which makes it the likeliest in the schema
+    to come back wrong.
+
+    Each entry is checked against RejectedAction itself rather than against one of its keys.
+    Checking only `strategy` left the other half of the same hole open: an entry naming a
+    real strategy with no `reason` still failed whole-model validation and voided the
+    decision. The model that defines a valid entry is the only thing that knows what one is.
     """
     if not isinstance(raw, list):
         return []
     kept: list[dict[str, Any]] = []
     dropped: list[Any] = []
     for entry in raw:
-        if isinstance(entry, dict) and entry.get("strategy") in ALL_STRATEGIES:
-            kept.append(entry)
-        else:
+        try:
+            RejectedAction.model_validate(entry)
+        except ValidationError:
             dropped.append(entry)
+        else:
+            kept.append(entry)
     if dropped:
         audit.record("strategist.rejection_discarded", debtor_id=debtor_id, dropped=dropped)
     return kept
