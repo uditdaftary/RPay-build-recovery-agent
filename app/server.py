@@ -211,7 +211,16 @@ def create_order(body: CreateOrderRequest) -> JSONResponse:
     if invoice is None:
         return JSONResponse({"error": "unknown token"}, status_code=404)
 
+    if invoice["status"] == "PAID":
+        return JSONResponse({"error": "this invoice is already settled"}, status_code=400)
+    if invoice["status"] == "DISPUTED":
+        return JSONResponse({"error": "this invoice has an open dispute"}, status_code=400)
+
     amount = body.amount_paise or invoice["amount_paise"]
+    if amount > invoice["amount_paise"]:
+        return JSONResponse(
+            {"error": "amount exceeds the invoice balance"}, status_code=400
+        )
     try:
         order = razorpay_gateway.create_order(
             amount_paise=amount,
@@ -330,6 +339,8 @@ def record_promise(body: PromiseRequest) -> JSONResponse:
     invoice = DEMO_INVOICES.get(body.token)
     if invoice is None:
         return JSONResponse({"error": "unknown token"}, status_code=404)
+    if invoice["status"] == "PAID":
+        return JSONResponse({"error": "this invoice is already settled"}, status_code=400)
 
     amount = body.promised_amount_paise or invoice["amount_paise"]
     invoice["status"] = "PROMISED"
@@ -361,6 +372,8 @@ def raise_dispute(body: DisputeRequest) -> JSONResponse:
     invoice = DEMO_INVOICES.get(body.token)
     if invoice is None:
         return JSONResponse({"error": "unknown token"}, status_code=404)
+    if invoice["status"] == "PAID":
+        return JSONResponse({"error": "this invoice is already settled"}, status_code=400)
 
     invoice["status"] = "DISPUTED"
     invoice["dispute_reason"] = body.reason
