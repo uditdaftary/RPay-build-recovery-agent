@@ -33,8 +33,8 @@
   <details>
     <summary>Something is wrong with this invoice</summary>
     <div>
-      <label class="small muted" for="dispute-reason">What is the problem?</label>
-      <textarea id="dispute-reason" maxlength="{{ dispute_reason_max }}" placeholder="For example: the goods were short delivered, or this was already paid by NEFT on 12 August."></textarea>
+      <label class="small muted" for="dispute-reason">What is the problem? Up to {{ dispute_reason_max }} characters.</label>
+      <textarea id="dispute-reason" placeholder="For example: the goods were short delivered, or this was already paid by NEFT on 12 August."></textarea>
       <button id="dispute">Raise a dispute</button>
       <div id="dispute-status"></div>
     </div>
