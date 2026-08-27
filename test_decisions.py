@@ -793,7 +793,17 @@ def test_decision_made_has_one_shape() -> None:
 
     assert len(seen) == 2, f"expected one decision.made per path, saw {len(seen)}"
     assert seen[0] == seen[1], f"suppression path differs by {seen[0] ^ seen[1]}"
-    for required in ("action_class", "channel", "tone", "rejected_actions", "debtor_name"):
+    for required in (
+        "action_class",
+        "channel",
+        "tone",
+        "rejected_actions",
+        "debtor_name",
+        # The results page reads confidence to tell a real decision from a fallback, and
+        # language drives the Hinglish generation. Neither reaches it if neither is logged.
+        "confidence",
+        "language",
+    ):
         assert required in seen[0], f"{required} missing from decision.made"
     print("ok  decision.made carries one shape on both paths")
 

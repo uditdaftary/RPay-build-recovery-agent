@@ -126,7 +126,12 @@ def _record_decision(decision: StrategistDecision) -> None:
         action_class=decision.action_class,
         review_required=decision.review_required,
         channel=decision.channel,
+        language=decision.language,
         tone=decision.tone,
+        # Confidence separates a real decision from a 0.5 fallback, and the log is the only
+        # surface the results page and the export read. Without it a run cannot be filtered
+        # for the decisions the model actually made.
+        confidence=decision.confidence,
         ask_amount_paise=decision.ask_amount_paise,
         deadline_requested=decision.deadline_requested,
         reasoning=decision.reasoning,
