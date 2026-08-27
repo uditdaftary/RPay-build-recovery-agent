@@ -963,8 +963,15 @@ def live_agent_vs_baseline() -> None:
         )
 
     opted_out_ids = {d["debtor_id"] for d in subset["debtors"] if d["opted_out"]}
+    # Not every WAIT is judgment. A prohibited strategy intercepted by the envelope is
+    # forced to WAIT and flagged, and counting those as restraint would report the
+    # guardrails firing as the model showing discretion. review_required separates them.
     restraint = [
-        d for d in agent_decisions if d.strategy == Strategy.WAIT and d.debtor_id not in opted_out_ids
+        d
+        for d in agent_decisions
+        if d.strategy == Strategy.WAIT
+        and d.debtor_id not in opted_out_ids
+        and not d.review_required
     ]
     print(
         f"\nWAIT decisions that are genuine restraint rather than opt-out suppression: "
