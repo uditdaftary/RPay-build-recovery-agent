@@ -222,7 +222,19 @@ def evaluate_envelope(
             Strategy.ESCALATE,
             "cannot escalate an account with an active open dispute",
         )
-        # RESOLVE_DISPUTE and HUMAN_HANDOFF remain permitted
+        # Every other money ask goes with them. Pressing a debtor for a payment date or a
+        # settlement figure is still asking for money from someone who has told us the
+        # invoice is wrong, and OBTAIN_PROMISE and NEGOTIATE_PARTIAL used to survive here
+        # and hand the model a compliant way to do exactly that. The two grounds above stay
+        # spelled out because they are the sharpest, not because they are the only ones.
+        # RESOLVE_DISPUTE and HUMAN_HANDOFF remain permitted: both answer the dispute.
+        for money_ask in sorted(ASKS_FOR_MONEY - {Strategy.REQUEST_PAYMENT, Strategy.ESCALATE}):
+            _exclude(
+                excluded,
+                action_classes,
+                money_ask,
+                "open invoice dispute must be resolved before any ask for money",
+            )
 
     # 2b. NOTHING COLLECTIBLE: every open invoice is already settled, by TDS credit or by
     # off-rail NEFT. Asking for money that has been paid is the naive-agent failure the

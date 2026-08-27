@@ -126,9 +126,13 @@ def test_envelope_disputed_invoice() -> None:
     res = evaluate_envelope(debtor, invoices, merchant)
     assert Strategy.RESOLVE_DISPUTE in res.permitted_strategies
     assert Strategy.HUMAN_HANDOFF in res.permitted_strategies
-    assert Strategy.REQUEST_PAYMENT not in res.permitted_strategies
-    assert Strategy.ESCALATE not in res.permitted_strategies
+    # The whole set, not the two obvious members. Checking REQUEST_PAYMENT and ESCALATE
+    # alone is what let OBTAIN_PROMISE and NEGOTIATE_PARTIAL survive an open dispute: both
+    # are compliant ways to ask a debtor for money they have said they do not owe.
+    for money_ask in sorted(ASKS_FOR_MONEY):
+        assert money_ask not in res.permitted_strategies, f"{money_ask} survived an open dispute"
     assert "dispute" in res.excluded_reasons[Strategy.REQUEST_PAYMENT].lower()
+    assert "dispute" in res.excluded_reasons[Strategy.OBTAIN_PROMISE].lower()
     print("ok  envelope open dispute protection")
 
 
