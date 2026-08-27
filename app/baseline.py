@@ -45,7 +45,7 @@ class BaselineDecision:
 _RUNGS: tuple[tuple[int, Strategy, str, str], ...] = (
     (0, Strategy.WAIT, "neutral", "Invoice is within contractual terms; no action required."),
     (7, Strategy.REQUEST_PAYMENT, "polite", "Standard 7-day polite reminder."),
-    (15, Strategy.REQUEST_PAYMENT, "firm", "Day 14 firm follow-up reminder."),
+    (15, Strategy.REQUEST_PAYMENT, "firm", "Day 15 firm follow-up reminder."),
     (30, Strategy.ESCALATE, "urgent", "Day 30 overdue escalation notice."),
 )
 _FINAL_RUNG: tuple[Strategy, str, str] = (
