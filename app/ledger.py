@@ -25,7 +25,7 @@ import argparse
 import hashlib
 import json
 import random
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import date, timedelta
 from enum import StrEnum
 from pathlib import Path
@@ -144,7 +144,7 @@ def agent_view(debtor: dict) -> dict:
             f"debtor {debtor_id} has no `opted_out` field; "
             "suppression cannot be evaluated and the row must not reach the agent"
         )
-    return {field: debtor[field] for field in AGENT_VISIBLE_FIELDS if field in debtor}
+    return {name: debtor[name] for name in AGENT_VISIBLE_FIELDS if name in debtor}
 
 
 @dataclass
