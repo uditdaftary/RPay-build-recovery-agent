@@ -158,6 +158,10 @@ def resolution_page(request: Request, token: str) -> HTMLResponse:
             "invoice": invoice,
             "amount_display": format_inr(invoice["amount_paise"]),
             "razorpay_key_id": config.RAZORPAY_KEY_ID,
+            # The form constrains what the validators already enforce. Passed in rather
+            # than written twice, so the input and the bound cannot drift apart.
+            "promise_horizon_days": MAX_PROMISE_HORIZON_DAYS,
+            "dispute_reason_max": DISPUTE_REASON_MAX,
         },
     )
 
@@ -321,13 +325,16 @@ def record_promise(body: PromiseRequest) -> JSONResponse:
     return JSONResponse({"ok": True, "promised_date": body.promised_date.isoformat()})
 
 
+DISPUTE_REASON_MAX = 2000
+
+
 class DisputeRequest(BaseModel):
     token: str
     # Debtor-supplied free text, appended verbatim to the append-only audit log that the
     # envelope now reads on every decision, and bound for the strategist prompt once the
     # dispute handler reads `dispute_reason`. Bounded at both ends: an empty reason is not a
     # dispute, and an unbounded one is a way to grow the log a decision depends on.
-    reason: str = Field(min_length=1, max_length=2000)
+    reason: str = Field(min_length=1, max_length=DISPUTE_REASON_MAX)
 
 
 @app.post("/api/dispute")

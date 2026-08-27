@@ -34,7 +34,7 @@
     <summary>Something is wrong with this invoice</summary>
     <div>
       <label class="small muted" for="dispute-reason">What is the problem?</label>
-      <textarea id="dispute-reason" placeholder="For example: the goods were short delivered, or this was already paid by NEFT on 12 August."></textarea>
+      <textarea id="dispute-reason" maxlength="{{ dispute_reason_max }}" placeholder="For example: the goods were short delivered, or this was already paid by NEFT on 12 August."></textarea>
       <button id="dispute">Raise a dispute</button>
       <div id="dispute-status"></div>
     </div>
@@ -56,6 +56,7 @@
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 <script>
   const TOKEN = {{ token | tojson }};
+  const PROMISE_HORIZON_DAYS = {{ promise_horizon_days | tojson }};
   const KEY_ID = {{ razorpay_key_id | tojson }};
   const INVOICE_ID = {{ invoice.invoice_id | tojson }};
   const DEBTOR = {{ invoice.debtor | tojson }};
@@ -76,6 +77,17 @@
     if (!res.ok) throw new Error(data.error || ("Request failed with status " + res.status));
     return data;
   }
+
+  // Bound the picker to the same window the server enforces, so the debtor is stopped by
+  // the calendar rather than by a rejected request. The server stays authoritative.
+  (() => {
+    const localDay = (d) =>
+      new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+    const field = document.getElementById("promised-date");
+    const today = new Date();
+    field.min = localDay(today);
+    field.max = localDay(new Date(today.getTime() + PROMISE_HORIZON_DAYS * 86400000));
+  })();
 
   document.getElementById("pay").addEventListener("click", async () => {
     const button = document.getElementById("pay");
