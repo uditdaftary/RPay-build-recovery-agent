@@ -52,6 +52,24 @@ DEMO_INVOICES: dict[str, dict] = {
 }
 
 
+# The debtor-facing bounds. Kept together and above the page that publishes them into the
+# form, so a reader of resolution_page can see what limits it is rendering.
+#
+# A promise is no longer only a record. `contact_history` folds `promise.made` into
+# DebtorHistory and the envelope excludes every money ask while the promise has not fallen
+# due, so this endpoint writes a control input for the decision engine. It is public and
+# unauthenticated, which makes an unbounded date a way to switch recovery off: one request
+# naming a date in 2099 suppressed the account permanently. Ninety days is longer than any
+# commercial payment term this product targets.
+MAX_PROMISE_HORIZON_DAYS = 90
+
+# One crore. Above this the figure is a typo or an attack, not a commitment, and it is
+# rendered into the envelope's own exclusion reasoning.
+MAX_PROMISE_PAISE = 1_00_00_000_00
+
+DISPUTE_REASON_MAX = 2000
+
+
 @app.exception_handler(RequestValidationError)
 def rejected_input(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Answer a rejected request in the shape the resolution page already reads.
@@ -281,17 +299,6 @@ async def razorpay_webhook(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True})
 
 
-# A promise is no longer only a record. `contact_history` folds `promise.made` into
-# DebtorHistory and the envelope excludes every money ask while the promise has not fallen
-# due, so this endpoint writes a control input for the decision engine. It is public and
-# unauthenticated, which makes an unbounded date a way to switch recovery off: one request
-# naming a date in 2099 suppressed the account permanently. Ninety days is longer than any
-# commercial payment term this product targets.
-MAX_PROMISE_HORIZON_DAYS = 90
-
-# One crore. Above this the figure is a typo or an attack, not a commitment, and it is
-# rendered into the envelope's own exclusion reasoning.
-MAX_PROMISE_PAISE = 1_00_00_000_00
 
 
 class PromiseRequest(BaseModel):
@@ -334,9 +341,6 @@ def record_promise(body: PromiseRequest) -> JSONResponse:
         promised_amount_paise=amount,
     )
     return JSONResponse({"ok": True, "promised_date": body.promised_date.isoformat()})
-
-
-DISPUTE_REASON_MAX = 2000
 
 
 class DisputeRequest(BaseModel):
