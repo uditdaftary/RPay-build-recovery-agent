@@ -306,7 +306,11 @@ def record_promise(body: PromiseRequest) -> JSONResponse:
 
 class DisputeRequest(BaseModel):
     token: str
-    reason: str
+    # Debtor-supplied free text, appended verbatim to the append-only audit log that the
+    # envelope now reads on every decision, and bound for the strategist prompt once the
+    # dispute handler reads `dispute_reason`. Bounded at both ends: an empty reason is not a
+    # dispute, and an unbounded one is a way to grow the log a decision depends on.
+    reason: str = Field(min_length=1, max_length=2000)
 
 
 @app.post("/api/dispute")
