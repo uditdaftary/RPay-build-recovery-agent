@@ -85,6 +85,11 @@ face value, that the statutory window is measured from acceptance, that exactly 
 merchant can invoke the statute, and that the hidden behaviour parameters never reach the
 agent's view.
 
+It also checks the committed `data/ledger.json` against what the seed produces now. The two
+can drift, and did: a clamp on `avg_days_late` changed the generator without the file being
+regenerated, so every number was measured on a ledger the seed no longer produced. Comparing
+one generated ledger with another only proves the generator is deterministic.
+
 ```bash
 python -m ruff check .
 ```
