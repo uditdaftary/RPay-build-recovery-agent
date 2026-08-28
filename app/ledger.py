@@ -505,6 +505,18 @@ def _self_check() -> None:
     debtor = Debtor(**{**a["debtors"][0], "behaviour": BehaviourParams(**a["debtors"][0]["behaviour"])})
     assert "behaviour" not in debtor.agent_view(), "hidden parameters leaked into the agent view"
 
+    # The tracked artifact must still be what the seed produces. Comparing generate(42) to
+    # generate(42) only proves the generator is deterministic; it says nothing about the file
+    # every reported number was measured on, which is how a clamp on avg_days_late silently
+    # left data/ledger.json a version behind its own generator.
+    if LEDGER_PATH.exists():
+        committed = json.loads(LEDGER_PATH.read_text(encoding="utf-8"))
+        assert fingerprint(committed) == fingerprint(a), (
+            f"{LEDGER_PATH.name} ({fingerprint(committed)}) no longer matches seed 42 "
+            f"({fingerprint(a)}); re-run `python -m app.ledger --seed 42 --write` and "
+            "re-derive any number measured on the old file"
+        )
+
     print("ok  ledger self check passed")
 
 
