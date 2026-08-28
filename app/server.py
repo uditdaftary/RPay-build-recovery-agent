@@ -13,6 +13,7 @@ webhook is what tells the *system*, and it is the only one that arrives when the
 closes the tab mid-redirect. Suppression therefore hangs off the webhook alone.
 """
 
+import logging
 from datetime import date, timedelta
 
 import razorpay
@@ -24,6 +25,9 @@ from pydantic import BaseModel, Field, field_validator
 
 from app import audit, config, razorpay_gateway
 from app.config import PROJECT_ROOT, business_today
+from app.contact_history import MAX_PROMISE_WINDOWS_WITHOUT_SETTLEMENT
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="B2B Receivables Recovery Agent")
 templates = Jinja2Templates(directory=str(PROJECT_ROOT / "app" / "templates"))
@@ -83,18 +87,36 @@ def rejected_input(request: Request, exc: RequestValidationError) -> JSONRespons
     errors = exc.errors()
     first = errors[0] if errors else {}
     message = str(first.get("msg", "That value was not accepted."))
-    # Recorded, not only answered. The promise horizon is what stops one request from
-    # suppressing an account indefinitely, so an attempt on it belongs in the log beside
-    # order.rejected and webhook.signature_mismatch. Every field is named, not just the
-    # one the debtor is shown, because repeated probing is the pattern worth seeing.
-    audit.record(
-        "request.rejected",
-        path=request.url.path,
-        fields=[".".join(str(part) for part in error.get("loc", ())) for error in errors],
-        messages=[str(error.get("msg", "")) for error in errors],
+    # Logged, not recorded. These endpoints are public and unauthenticated, and the audit
+    # log is now an input to the envelope that `contact_history` re-parses in full on every
+    # decision - so an audit row per rejected request is an anonymous way to grow the file
+    # the decision engine reads. Same reasoning `read_all` and `contact_history` already
+    # apply to malformed rows: a defect in the caller belongs where defects go, not in the
+    # evaluation artifact. Every field is named, because repeated probing is the pattern
+    # worth seeing.
+    logger.warning(
+        "rejected %s: fields=%s messages=%s",
+        request.url.path,
+        [".".join(str(part) for part in error.get("loc", ())) for error in errors],
+        [str(error.get("msg", "")) for error in errors],
     )
     # Pydantic prefixes its own validators; the debtor does not need the machinery.
     return JSONResponse({"error": message.removeprefix("Value error, ")}, status_code=422)
+
+
+def _mutation_blocked(invoice: dict, *, allow_disputed: bool = False) -> JSONResponse | None:
+    """The state gate the three debtor-facing endpoints share, or None if the write may run.
+
+    They all mutate one `status` field and each grew its own guard set, so a promise landing
+    on a disputed invoice rewrote the status to PROMISED and reopened the payment path that
+    `create_order` had just been taught to close. `raise_dispute` is the one caller allowed
+    to touch a disputed invoice, because restating a dispute changes nothing.
+    """
+    if invoice["status"] == "PAID":
+        return JSONResponse({"error": "this invoice is already settled"}, status_code=400)
+    if invoice["status"] == "DISPUTED" and not allow_disputed:
+        return JSONResponse({"error": "this invoice has an open dispute"}, status_code=400)
+    return None
 
 
 def format_inr(paise: int) -> str:
@@ -200,8 +222,10 @@ def resolution_page(request: Request, token: str) -> HTMLResponse:
 
 class CreateOrderRequest(BaseModel):
     token: str
+    # gt=0 rather than an unbounded int: a request naming 0 is a request for nothing, and
+    # the `or` idiom below would have read it as "no amount given" and charged the lot.
     amount_paise: int | None = Field(
-        default=None, description="Defaults to the full outstanding amount."
+        default=None, gt=0, description="Defaults to the full outstanding amount."
     )
 
 
@@ -211,12 +235,12 @@ def create_order(body: CreateOrderRequest) -> JSONResponse:
     if invoice is None:
         return JSONResponse({"error": "unknown token"}, status_code=404)
 
-    if invoice["status"] == "PAID":
-        return JSONResponse({"error": "this invoice is already settled"}, status_code=400)
-    if invoice["status"] == "DISPUTED":
-        return JSONResponse({"error": "this invoice has an open dispute"}, status_code=400)
+    blocked = _mutation_blocked(invoice)
+    if blocked is not None:
+        return blocked
 
-    amount = body.amount_paise or invoice["amount_paise"]
+    # `is None`, not truthiness. See the field definition: 0 is an answer, not a silence.
+    amount = invoice["amount_paise"] if body.amount_paise is None else body.amount_paise
     if amount > invoice["amount_paise"]:
         return JSONResponse(
             {"error": "amount exceeds the invoice balance"}, status_code=400
@@ -263,9 +287,22 @@ def verify_payment(body: VerifyPaymentRequest) -> JSONResponse:
     were the system of record, an abandoned redirect would leave a paid invoice being
     chased.
     """
-    ok = razorpay_gateway.verify_payment_signature(
-        body.razorpay_order_id, body.razorpay_payment_id, body.razorpay_signature
-    )
+    try:
+        ok = razorpay_gateway.verify_payment_signature(
+            body.razorpay_order_id, body.razorpay_payment_id, body.razorpay_signature
+        )
+    except RuntimeError as exc:
+        # Mirrors the webhook's handling of the same class of failure. Without this the
+        # debtor who has just paid gets an unhandled 500 on the one surface they see, and
+        # the misconfiguration leaves no trace in the log at all.
+        # The detail goes to the log, not to the caller. This endpoint is public and its
+        # body is rendered straight onto the resolution page, so `str(exc)` would tell a
+        # stranger which environment variable is missing and how the app is deployed.
+        audit.record("checkout.misconfigured", error=str(exc))
+        return JSONResponse(
+            {"error": "payment confirmation is unavailable; the team has been notified"},
+            status_code=500,
+        )
     audit.record(
         "checkout.signature_verified" if ok else "checkout.signature_mismatch",
         order_id=body.razorpay_order_id,
@@ -339,10 +376,62 @@ def record_promise(body: PromiseRequest) -> JSONResponse:
     invoice = DEMO_INVOICES.get(body.token)
     if invoice is None:
         return JSONResponse({"error": "unknown token"}, status_code=404)
-    if invoice["status"] == "PAID":
-        return JSONResponse({"error": "this invoice is already settled"}, status_code=400)
+    blocked = _mutation_blocked(invoice)
+    if blocked is not None:
+        return blocked
+    # Bounded against this invoice, not only against the crore ceiling on the field. The
+    # figure is folded into DebtorHistory and rendered verbatim into the envelope's own
+    # exclusion reasoning, so an unanchored number becomes part of the audit trail.
+    if body.promised_amount_paise is not None and body.promised_amount_paise > invoice["amount_paise"]:
+        return JSONResponse(
+            {"error": "promised amount exceeds the invoice balance"}, status_code=400
+        )
 
-    amount = body.promised_amount_paise or invoice["amount_paise"]
+    # The two rules the audit fold applies to `promise.made`, answered here so the debtor
+    # is told rather than sent an "ok" for a commitment the decision engine has already
+    # decided to ignore. This reads per-invoice memory, so it is the cheap front door;
+    # `contact_history.build` stays the authority, because it survives a restart and folds
+    # what was actually logged rather than what this process happens to remember.
+    recorded = invoice.get("promised_date")
+    open_until = date.fromisoformat(recorded) if recorded else None
+    if open_until is not None and open_until >= business_today():
+        # A running commitment may be brought forward, never pushed back. Pushing it back is
+        # how one public endpoint held recovery off indefinitely: promise again each time the
+        # date got close and the envelope never permits a money ask.
+        if body.promised_date > open_until:
+            return JSONResponse(
+                {
+                    "error": f"a payment date of {recorded} is already on record; "
+                    "a new date has to be earlier than that one"
+                },
+                status_code=400,
+            )
+    else:
+        # No commitment running, so this opens a fresh window. Bounded, because a debtor who
+        # lets each date pass and immediately names another is not making commitments.
+        # Counted across the debtor's invoices, because that is the scope the fold uses.
+        # Per invoice, a debtor holding two would get twice the budget here and then be
+        # quietly ignored by the fold, which is the humouring this check exists to stop.
+        opened = sum(
+            other.get("promise_windows", 0)
+            for other in DEMO_INVOICES.values()
+            if other["debtor_id"] == invoice["debtor_id"]
+        )
+        if opened >= MAX_PROMISE_WINDOWS_WITHOUT_SETTLEMENT:
+            return JSONResponse(
+                {
+                    "error": f"{opened} payment dates have already passed without payment; "
+                    "this invoice needs to be settled or discussed with a person"
+                },
+                status_code=400,
+            )
+        invoice["promise_windows"] = opened + 1
+
+    amount = (
+        invoice["amount_paise"]
+        if body.promised_amount_paise is None
+        else body.promised_amount_paise
+    )
     invoice["status"] = "PROMISED"
     invoice["promised_date"] = body.promised_date.isoformat()
     invoice["promised_amount_paise"] = amount
@@ -372,8 +461,9 @@ def raise_dispute(body: DisputeRequest) -> JSONResponse:
     invoice = DEMO_INVOICES.get(body.token)
     if invoice is None:
         return JSONResponse({"error": "unknown token"}, status_code=404)
-    if invoice["status"] == "PAID":
-        return JSONResponse({"error": "this invoice is already settled"}, status_code=400)
+    blocked = _mutation_blocked(invoice, allow_disputed=True)
+    if blocked is not None:
+        return blocked
 
     invoice["status"] = "DISPUTED"
     invoice["dispute_reason"] = body.reason
