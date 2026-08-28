@@ -20,7 +20,12 @@ from datetime import date
 from enum import StrEnum
 from typing import Any
 
-from app.ledger import InvoiceState, Merchant, msmed_eligible
+from app.ledger import (
+    STATUTORY_WINDOW_WRITTEN_DAYS,
+    InvoiceState,
+    Merchant,
+    msmed_eligible,
+)
 
 
 class Strategy(StrEnum):
@@ -145,6 +150,10 @@ def evaluate_envelope(
     *,
     max_concession_pct: float = 0.05,
     vip_exposure_ratio: float = 0.05,
+    # The age past which exposure no longer buys relationship protection. Defaults to the
+    # MSMED written-agreement window, since that is the point the statutory levers open.
+    escalation_age_days: int = STATUTORY_WINDOW_WRITTEN_DAYS,
+    negotiation_floor_paise: int = 50_000_00,
     history: DebtorHistory | None = None,
     cooldown_days: int = 7,
     max_escalations: int = 2,
@@ -304,7 +313,7 @@ def evaluate_envelope(
     # trivially, and recording a relationship-protection ground the agent never weighed
     # would misrepresent the reasoning in the audit trail. Rule 2b already covers that case.
     ttm_value = debtor.get("trailing_12m_value_paise") or 0
-    if max_days_overdue < 45 and collectible_paise > 0:
+    if max_days_overdue < escalation_age_days and collectible_paise > 0:
         if ttm_value <= 0:
             _exclude(
                 excluded,
@@ -324,7 +333,7 @@ def evaluate_envelope(
             )
 
     # 7. PARTIAL NEGOTIATION: Permitted if partial payment history or substantial balance
-    if collectible_paise < 50_000_00 and not has_partially_paid:
+    if collectible_paise < negotiation_floor_paise and not has_partially_paid:
         _exclude(
             excluded,
             action_classes,
