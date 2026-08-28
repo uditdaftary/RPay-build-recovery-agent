@@ -29,7 +29,9 @@ from pathlib import Path
 
 from app import audit, llm
 from app.baseline import decide_baseline, run_baseline_batch, rung_for_days
+from app.config import business_today
 from app.contact_history import build as build_contact_history
+from app.contact_history import history_as_of
 from app.envelope import (
     ASKS_FOR_MONEY,
     NO_CONTACT_STRATEGIES,
@@ -43,6 +45,11 @@ from app.ledger import LEDGER_PATH, InvoiceState, Merchant, UdyamActivity, agent
 from app.strategist import decide_for_debtor, run_strategist_batch
 
 RUN_LIVE_LLM_CHECKS = os.getenv("RUN_LIVE_LLM_CHECKS") == "1"
+
+# Deliberately damaged audit rows. A killed process can only truncate the final line;
+# a broken row anywhere else means the log lost data the envelope reads.
+TRUNCATED_ROW = '{"truncated'
+CORRUPT_MIDDLE = '{"event":"a"}' + chr(10) + '{broken' + chr(10) + '{"event":"c"}' + chr(10)
 
 
 @contextmanager
@@ -410,6 +417,284 @@ def test_promise_horizon_bounds_the_suppression_window() -> None:
     assert rejected.status_code == 422
     assert "error" in rejected.json(), f"page cannot read the refusal: {rejected.json()}"
     print("ok  a debtor cannot promise past the suppression horizon")
+
+
+def test_audit_survives_unicode_line_separators() -> None:
+    """A debtor's own text must not be able to split its row, or stop the engine.
+
+    `json.dumps` escapes everything below 0x20, so a newline cannot appear inside a row -
+    but U+2028, U+2029 and U+0085 pass through `ensure_ascii=False` untouched, and
+    `str.splitlines()` treats all three as line breaks. Read that way, one character in a
+    dispute reason fragmented its own row into two unparsable halves, and the strict reader
+    then refused every later decision. `reason` is unauthenticated debtor text.
+    """
+    with tempfile.TemporaryDirectory(prefix="recovery-agent-audit-rows-") as scratch:
+        original_dir, original_log = audit.AUDIT_DIR, audit.EVENT_LOG
+        audit.AUDIT_DIR = Path(scratch)
+        audit.EVENT_LOG = audit.AUDIT_DIR / "events.jsonl"
+        try:
+            hostile = "short delivered" + chr(0x2028) + chr(0x2029) + chr(0x85) + "please check"
+            audit.record("dispute.raised", debtor_id="DEB-ROW", reason=hostile)
+            audit.record("promise.made", debtor_id="DEB-ROW", promised_date="2026-09-05")
+
+            rows = audit.read_all()
+            assert [r["event"] for r in rows] == ["dispute.raised", "promise.made"], (
+                f"a line separator in debtor text split the log: {rows}"
+            )
+            assert rows[0]["reason"] == hostile, "the reason did not survive the round trip"
+            # One physical line per record, whatever the payload contains.
+            assert audit.EVENT_LOG.read_bytes().count(b"\n") == 2, "a record wrote two rows"
+
+            # A process killed mid-append can only damage the final line, and that one is
+            # dropped. Anything earlier means the log lost data the envelope reads.
+            audit.EVENT_LOG.write_text(
+                audit.EVENT_LOG.read_text(encoding="utf-8") + TRUNCATED_ROW, encoding="utf-8"
+            )
+            assert len(audit.read_all()) == 2, "a truncated final row was not tolerated"
+
+            audit.EVENT_LOG.write_text(CORRUPT_MIDDLE, encoding="utf-8")
+            try:
+                audit.read_all()
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("a corrupt mid-file row was read past silently")
+        finally:
+            audit.AUDIT_DIR, audit.EVENT_LOG = original_dir, original_log
+    print("ok  audit rows survive debtor text and fail loudly when data is lost")
+
+
+def test_envelope_ignores_the_age_of_settled_invoices() -> None:
+    """Rule 6's age gate must read the age of money still owed, not money already in."""
+    merchant = Merchant("MER-001", "Nandi", True, "small", UdyamActivity.MANUFACTURING)
+    debtor = {
+        "debtor_id": "DEB-VIP",
+        "name": "VIP Co",
+        "opted_out": False,
+        "trailing_12m_value_paise": 100_000_00_00,
+    }
+    live = {
+        "invoice_id": "INV-LIVE",
+        "amount_paise": 50_000_00,
+        "amount_received_paise": 0,
+        "tds_deducted_paise": 0,
+        "state": InvoiceState.OVERDUE,
+        "days_overdue": 10,
+    }
+    # Already collected off-rail, and old enough to clear the escalation age on its own.
+    settled = {
+        "invoice_id": "INV-PAID",
+        "amount_paise": 10_00_000,
+        "amount_received_paise": 10_00_000,
+        "tds_deducted_paise": 0,
+        "state": InvoiceState.PAID_OFF_RAIL,
+        "days_overdue": 50,
+        "off_rail_reference": "UTR-1",
+    }
+
+    alone = evaluate_envelope(debtor, [live], merchant)
+    assert Strategy.ESCALATE not in alone.permitted_strategies, "0.5% exposure was escalable"
+
+    with_settled = evaluate_envelope(debtor, [live, settled], merchant)
+    assert with_settled.collectible_paise == alone.collectible_paise, (
+        "a settled invoice changed the collectible balance"
+    )
+    assert Strategy.ESCALATE not in with_settled.permitted_strategies, (
+        "an invoice already paid off-rail aged the account out of relationship protection"
+    )
+
+    # A genuinely live invoice of the same age must still lift the protection.
+    aged = {**settled, "amount_received_paise": 0, "state": InvoiceState.OVERDUE}
+    live_result = evaluate_envelope(debtor, [live, aged], merchant)
+    assert Strategy.ESCALATE in live_result.permitted_strategies, (
+        "a live 50-day invoice no longer clears the escalation age gate"
+    )
+    print("ok  only money still owed ages an account")
+
+
+def test_history_as_of_takes_the_later_clock() -> None:
+    """Events arrive on the wall clock; the ledger's as_of is pinned. The fold needs both."""
+    seeded = date(2026, 8, 26)
+    assert history_as_of(seeded, today=date(2026, 8, 20)) == seeded, (
+        "the fold moved behind the ledger's own date"
+    )
+    assert history_as_of(seeded, today=date(2026, 9, 2)) == date(2026, 9, 2), (
+        "the fold stayed pinned in the past and would discard every live event"
+    )
+
+    promise = {
+        "ts": "2026-08-28T10:00:00+00:00",
+        "event": "promise.made",
+        "debtor_id": "DEB-LIVE",
+        "invoice_id": "INV-1",
+        "promised_date": "2026-09-05",
+    }
+    folded = build_contact_history(history_as_of(seeded, today=date(2026, 8, 28)), [promise])
+    assert folded["DEB-LIVE"].active_promise_date == date(2026, 9, 5), (
+        "a promise made after the seeded date never reached the envelope"
+    )
+
+    # Paying a different invoice must not cancel it.
+    settled_elsewhere = {
+        "ts": "2026-08-29T10:00:00+00:00",
+        "event": "settlement.confirmed",
+        "debtor_id": "DEB-LIVE",
+        "invoice_id": "INV-2",
+    }
+    still_open = build_contact_history(date(2026, 8, 30), [promise, settled_elsewhere])
+    assert still_open["DEB-LIVE"].active_promise_date == date(2026, 9, 5), (
+        "settling another invoice closed this invoice's promise"
+    )
+    print("ok  the audit fold follows the later of the two clocks")
+
+
+def test_resolution_endpoints_share_one_state_gate() -> None:
+    """A dispute closes the payment and promise doors, and money asks are bounded."""
+    from fastapi.testclient import TestClient
+
+    from app.server import DEMO_INVOICES, app
+
+    token = "tok_demo2"
+    original = dict(DEMO_INVOICES[token])
+    due = (business_today() + timedelta(days=7)).isoformat()
+    try:
+        with TestClient(app) as client:
+            invoice_paise = DEMO_INVOICES[token]["amount_paise"]
+            # 0 is an answer, not a silence: refused, never read as "the whole invoice".
+            zero = client.post("/api/create-order", json={"token": token, "amount_paise": 0})
+            assert zero.status_code == 422, f"an amount of zero was accepted ({zero.text})"
+
+            over = client.post(
+                "/api/promise",
+                json={
+                    "token": token,
+                    "promised_date": due,
+                    "promised_amount_paise": invoice_paise + 1,
+                },
+            )
+            assert over.status_code == 400, "a promise above the invoice balance was accepted"
+
+            assert client.post(
+                "/api/dispute", json={"token": token, "reason": "short delivered"}
+            ).status_code == 200
+
+            # A promise used to rewrite the status to PROMISED and reopen the payment path.
+            promised = client.post("/api/promise", json={"token": token, "promised_date": due})
+            assert promised.status_code == 400, "a promise was accepted on a disputed invoice"
+            assert DEMO_INVOICES[token]["status"] == "DISPUTED", "the dispute was cleared"
+            assert client.post("/api/create-order", json={"token": token}).status_code == 400, (
+                "payment was reopened on a disputed invoice"
+            )
+    finally:
+        DEMO_INVOICES[token] = original
+    print("ok  the resolution endpoints agree on what state accepts a write")
+
+
+def _promise(ts: str, promised: str, invoice_id: str = "INV-P") -> dict:
+    return {
+        "ts": ts,
+        "event": "promise.made",
+        "debtor_id": "DEB-PROM",
+        "invoice_id": invoice_id,
+        "promised_date": promised,
+    }
+
+
+def test_promises_cannot_hold_recovery_off_forever() -> None:
+    """An open promise blocks every money ask, so the number of them has to be bounded.
+
+    `/api/promise` is public and unauthenticated. Capping a single promise at 90 days only
+    made an unbounded hold periodic: name a new date each time the last one passes, or push
+    the current one back before it falls due, and the envelope never permits a money ask
+    again. The fold is the authority here, because it is what rule 10 actually reads.
+    """
+    # A commitment already running may be brought forward, never pushed back.
+    opened = _promise("2026-01-10T09:00:00+00:00", "2026-02-10")
+    pushed_back = _promise("2026-01-20T09:00:00+00:00", "2026-05-01")
+    held = build_contact_history(date(2026, 2, 1), [opened, pushed_back])
+    assert held["DEB-PROM"].active_promise_date == date(2026, 2, 10), (
+        "a promise was pushed back, which is the whole suppression attack"
+    )
+
+    brought_forward = _promise("2026-01-20T09:00:00+00:00", "2026-01-25")
+    sooner = build_contact_history(date(2026, 1, 22), [opened, brought_forward])
+    assert sooner["DEB-PROM"].active_promise_date == date(2026, 1, 25), (
+        "a debtor offering to pay sooner was refused"
+    )
+
+    # Letting each date pass and naming another opens a new window every time. Two is the
+    # budget; the third is not honoured and the agent resumes.
+    second = _promise("2026-02-11T09:00:00+00:00", "2026-03-15")
+    third = _promise("2026-03-16T09:00:00+00:00", "2026-04-20")
+    assert build_contact_history(date(2026, 3, 1), [opened, second])[
+        "DEB-PROM"
+    ].active_promise_date == date(2026, 3, 15), "the second window was refused"
+
+    exhausted = build_contact_history(date(2026, 4, 1), [opened, second, third])
+    assert exhausted["DEB-PROM"].active_promise_date is None, (
+        "a third promise with no payment in between still suppressed recovery"
+    )
+
+    # A settlement is the thing a promise was for, so it buys the budget back.
+    settled = {
+        "ts": "2026-03-16T08:00:00+00:00",
+        "event": "settlement.confirmed",
+        "debtor_id": "DEB-PROM",
+        "invoice_id": "INV-P",
+    }
+    after_paying = build_contact_history(date(2026, 4, 1), [opened, second, settled, third])
+    assert after_paying["DEB-PROM"].active_promise_date == date(2026, 4, 20), (
+        "a debtor who actually paid was not allowed to commit again"
+    )
+    print("ok  promises cannot hold recovery off indefinitely")
+
+
+def test_promise_endpoint_answers_instead_of_ignoring() -> None:
+    """The endpoint mirrors the fold's two rules, so the debtor is told, not humoured.
+
+    Returning `{"ok": true}` for a commitment the decision engine has already decided to
+    ignore is the confirm-shaming shape the strategist prompt forbids, pointed at the debtor.
+    """
+    from fastapi.testclient import TestClient
+
+    from app.server import DEMO_INVOICES, app
+
+    token = "tok_demo1"
+    original = dict(DEMO_INVOICES[token])
+    today = business_today()
+
+    def promise(days: int):
+        return client.post(
+            "/api/promise",
+            json={"token": token, "promised_date": (today + timedelta(days=days)).isoformat()},
+        )
+
+    try:
+        with TestClient(app) as client:
+            assert promise(7).status_code == 200, "a first payment date was refused"
+
+            pushed = promise(30)
+            assert pushed.status_code == 400, "a running commitment was pushed back"
+            assert "earlier" in pushed.json()["error"], pushed.json()
+
+            assert promise(3).status_code == 200, "a debtor offering to pay sooner was refused"
+            assert DEMO_INVOICES[token]["promise_windows"] == 1, (
+                "bringing a date forward spent a suppression window"
+            )
+
+            # Let the date pass without paying, twice, and the budget runs out.
+            DEMO_INVOICES[token]["promised_date"] = (today - timedelta(days=1)).isoformat()
+            assert promise(10).status_code == 200, "a second window was refused"
+
+            DEMO_INVOICES[token]["promised_date"] = (today - timedelta(days=1)).isoformat()
+            spent = promise(10)
+            assert spent.status_code == 400, (
+                "recovery could be suppressed for another window with no payment"
+            )
+            assert "person" in spent.json()["error"], spent.json()
+    finally:
+        DEMO_INVOICES[token] = original
+    print("ok  the promise endpoint refuses what the fold would ignore")
 
 
 def test_baseline_policy() -> None:
@@ -1102,6 +1387,12 @@ if __name__ == "__main__":
         test_envelope_max_intensity()
         test_envelope_active_promise()
         test_promise_horizon_bounds_the_suppression_window()
+        test_resolution_endpoints_share_one_state_gate()
+        test_envelope_ignores_the_age_of_settled_invoices()
+        test_history_as_of_takes_the_later_clock()
+        test_audit_survives_unicode_line_separators()
+        test_promises_cannot_hold_recovery_off_forever()
+        test_promise_endpoint_answers_instead_of_ignoring()
         test_baseline_policy()
         test_baseline_ladder_and_its_collapse()
         print("\nall decision tests passed")
