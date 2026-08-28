@@ -281,7 +281,7 @@ def _build_debtors(rng: random.Random, merchants: list[Merchant]) -> list[Debtor
                 promises_made=promises_made,
                 promises_kept=promises_kept,
                 prior_disputes=rng.choice([0, 0, 0, 1, 1, 2]),
-                avg_days_late=max(0, round(habitual + rng.uniform(-2, 3), 1)),
+                avg_days_late=max(0.0, round(habitual + rng.uniform(-2, 3), 1)),
                 behaviour=BehaviourParams(
                     pay_propensity=round(rng.uniform(0.10, 0.75), 3),
                     email_responsiveness=round(rng.uniform(0.05, 0.70), 3),
