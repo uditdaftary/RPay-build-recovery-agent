@@ -212,7 +212,22 @@ def evaluate_envelope(
     has_tds = any(i.get("state") == InvoiceState.TDS_UNDERPAID for i in invoices)
     has_off_rail = any(i.get("state") == InvoiceState.PAID_OFF_RAIL for i in invoices)
     has_partially_paid = any(i.get("state") == InvoiceState.PARTIALLY_PAID for i in invoices)
-    max_days_overdue = max((i.get("days_overdue", 0) for i in invoices), default=0)
+    # Only an invoice with something still collectible may age the account. A PAID_OFF_RAIL
+    # or TDS_UNDERPAID invoice reconciles to face value, so its age is the age of money
+    # already received; letting it drive the gates below is the "chase money already paid"
+    # failure those states exist to catch. A settled 50-day invoice used to lift rule 6's
+    # relationship protection off an account whose only live balance was days old.
+    max_days_overdue = max(
+        (
+            i.get("days_overdue", 0)
+            for i in invoices
+            if i["amount_paise"]
+            - i.get("amount_received_paise", 0)
+            - i.get("tds_deducted_paise", 0)
+            > 0
+        ),
+        default=0,
+    )
 
     # 2. DISPUTE: Open disputes require resolution or human review, not aggressive chasing
     if has_disputed:
