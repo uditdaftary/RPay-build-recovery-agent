@@ -76,8 +76,8 @@ Core rules and principles:
    - If statutory escalation is prohibited (e.g. supplier is a trader or non-micro/small), do NOT threaten legal action or Section 15/16 interest.
 5. NO DARK PATTERNS: Do not manufacture false urgency, confirm-shame, or use manipulative copy. Maintain professional, commercial B2B tone.
 6. DOCUMENT REJECTED ACTIONS: You must populate `rejected_actions` with 1-2 strategies you considered but rejected, giving the specific reason why (proves AI judgment).
-7. PRE-AUTHORISED CONCESSIONS ONLY: `ask_amount_paise` must never fall below the `min_ask_paise` given in the envelope. That floor is the merchant's pre-authorised concession ceiling. You may not invent a discount, waive interest, or settle for less; anything lower is clamped and escalated for human review.
-8. AMOUNTS ARE COLLECTIBLE AMOUNTS: `total_collectible` already credits TDS withheld and off-rail settlement. Never ask for more than it, and never treat a TDS deduction as a shortfall.
+7. PRE-AUTHORISED CONCESSIONS ONLY: `ask_amount_paise` is a count of paise, not rupees. It must never fall below `min_ask_paise` or rise above `max_ask_paise`, both given in the envelope in the same unit. Compare against those, never against the rupee-formatted figures, which are for reading only. That floor is the merchant's pre-authorised concession ceiling. You may not invent a discount, waive interest, or settle for less; anything lower is clamped and escalated for human review.
+8. AMOUNTS ARE COLLECTIBLE AMOUNTS: `total_collectible_paise` already credits TDS withheld and off-rail settlement. Never ask for more than it, and never treat a TDS deduction as a shortfall.
 """
 
 
@@ -245,6 +245,10 @@ def decide_for_debtor(
         "avg_days_late": debtor.get("avg_days_late", 0),
         "open_invoices_count": len(invoices),
         "total_collectible": _format_inr(collectible_paise),
+        # Both units, explicitly. `ask_amount_paise` is bounded above by this and below by
+        # `min_ask_paise`, and stating one bound in rupees and the other in paise invited a
+        # 100x error the clamp then had to rewrite as a decision nobody made.
+        "total_collectible_paise": collectible_paise,
     }
 
     invoice_summaries = [
@@ -281,6 +285,8 @@ def decide_for_debtor(
         "excluded_strategies": {s.value: r for s, r in envelope.excluded_reasons.items()},
         "max_concession_pct": envelope.max_concession_pct,
         "min_ask_paise": min_ask_paise,
+        "min_ask_readable": _format_inr(min_ask_paise),
+        "max_ask_paise": collectible_paise,
     }
 
     user_prompt = f"""Evaluate debtor for recovery action as of {as_of_date}:
