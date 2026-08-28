@@ -12,6 +12,7 @@ rather than agreeing with whatever the code happens to do.
 import hashlib
 import hmac
 import json
+from contextlib import contextmanager
 
 from app import razorpay_gateway
 
@@ -24,9 +25,6 @@ KNOWN_WEBHOOK_SIGNATURE = "b00f66913d76d2e4f32ca7dfaf83a1427e3f41ce4134f169c8830
 
 def sign(message: bytes, secret: str) -> str:
     return hmac.new(secret.encode(), message, hashlib.sha256).hexdigest()
-
-
-from contextlib import contextmanager
 
 
 @contextmanager

@@ -23,5 +23,6 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 # The suites import inside test functions on purpose, to keep app.server out of the
-# import graph for the offline checks that do not touch it.
-"test_*.py" = ["E402", "PLC0415"]
+# import graph for the offline checks that do not touch it. That is PLC0415 only; E402
+# is not needed, because every module-level import in these files is at the top.
+"test_*.py" = ["PLC0415"]
