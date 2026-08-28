@@ -107,6 +107,13 @@ class BehaviourParams:
     habitual_days_late: int
 
 
+# MSMED s.15 statutory windows, in days from acceptance. 45 where a written agreement fixes
+# a payment term, 15 otherwise. Named once because the generator, the self check and the
+# envelope's escalation-age gate all read the same number and were free to drift apart.
+STATUTORY_WINDOW_WRITTEN_DAYS = 45
+STATUTORY_WINDOW_DEFAULT_DAYS = 15
+
+
 AGENT_VISIBLE_FIELDS = (
     "debtor_id",
     "name",
@@ -306,7 +313,9 @@ def _statutory_dates(
         acceptance = delivery + timedelta(days=rng.randint(16, 40))
     else:
         acceptance = delivery
-    window = 45 if written_agreement else 15
+    window = (
+        STATUTORY_WINDOW_WRITTEN_DAYS if written_agreement else STATUTORY_WINDOW_DEFAULT_DAYS
+    )
     statutory_due = acceptance + timedelta(days=window)
     return acceptance, statutory_due, statutory_due + timedelta(days=1)
 
@@ -481,7 +490,11 @@ def _self_check() -> None:
     for inv in invoices:
         acceptance = date.fromisoformat(inv["acceptance_date"])
         statutory = date.fromisoformat(inv["statutory_due_date"])
-        expected = 45 if inv["written_agreement"] else 15
+        expected = (
+            STATUTORY_WINDOW_WRITTEN_DAYS
+            if inv["written_agreement"]
+            else STATUTORY_WINDOW_DEFAULT_DAYS
+        )
         assert (statutory - acceptance).days == expected, "statutory window miscomputed"
 
     # Exactly one merchant may invoke the statute; the trader may not.
