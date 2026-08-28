@@ -30,7 +30,7 @@
       "promises_made": 10,
       "promises_kept": 6,
       "prior_disputes": 2,
-      "avg_days_late": -1.5,
+      "avg_days_late": 0.0,
       "behaviour": {
         "pay_propensity": 0.581,
         "email_responsiveness": 0.404,
