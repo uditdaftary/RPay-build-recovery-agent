@@ -75,11 +75,21 @@ def stub_llm(payload: str):
         llm.complete = original
 
 
+class ModelWasCalled(BaseException):
+    """Raised when a path that must not consult the model does.
+
+    Deliberately not an Exception. `decide_for_debtor` wraps the model call in
+    `except Exception` and turns anything it catches into a `strategist.model_unavailable`
+    fallback decision, which would have swallowed this guard whole and left the check
+    passing or failing on an unrelated downstream assertion.
+    """
+
+
 @contextmanager
 def forbid_llm(message: str):
     """Fail the check if any decision path reaches the model at all."""
     def _explode(prompt, **kwargs):
-        raise AssertionError(message)
+        raise ModelWasCalled(message)
 
     original = llm.complete
     llm.complete = _explode
