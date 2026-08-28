@@ -95,9 +95,12 @@ def build(
 
     last_contact: dict[str, date] = {}
     escalations: dict[str, int] = {}
-    promises: dict[str, tuple[date, int | None]] = {}
+    promises: dict[str, tuple[date, int | None, str | None]] = {}
+    promise_windows: dict[str, int] = {}
     undated = 0
     unparsable_promise_dates: list[str] = []
+    extensions_refused = 0
+    windows_exhausted: set[str] = set()
 
     for event in events:
         debtor_id = event.get("debtor_id")
@@ -134,13 +137,64 @@ def build(
             promised = _parse_date(event.get("promised_date"))
             if promised is None:
                 unparsable_promise_dates.append(str(event.get("promised_date")))
+                continue
+
+            # A promise excludes every money ask until its date falls due, so the number of
+            # them a debtor may make is the real bound on how long recovery can be held off.
+            # The 90-day horizon on any single promise only made an unbounded hold periodic:
+            # one request every 89 days, or one the day after each broken date, suppressed
+            # the account for as long as the debtor cared to keep asking. Two rules bound it.
+            open_promise = promises.get(debtor_id)
+            still_open = open_promise is not None and open_promise[0] >= stamped
+
+            if still_open:
+                # A commitment already running may be brought forward, never pushed back.
+                # Moving the date out is the extension move, and it is the whole attack.
+                # Bringing it in is a debtor offering to pay sooner, which costs nothing and
+                # does not open a new window, so it is not counted below.
+                if promised > open_promise[0]:
+                    extensions_refused += 1
+                    continue
             else:
-                promises[debtor_id] = (promised, event.get("promised_amount_paise"))
+                # No promise running, so this one opens a fresh suppression window. Count it.
+                # Windows, not promises: a bring-forward inside a window is free, and only a
+                # date the debtor let pass without paying gets them to the next one.
+                windows = promise_windows.get(debtor_id, 0) + 1
+                promise_windows[debtor_id] = windows
+                if windows > MAX_PROMISE_WINDOWS_WITHOUT_SETTLEMENT:
+                    windows_exhausted.add(debtor_id)
+                    continue
+
+            promises[debtor_id] = (
+                promised,
+                event.get("promised_amount_paise"),
+                event.get("invoice_id"),
+            )
 
         elif name == "settlement.confirmed":
             # Settlement closes the promise. This is the same suppression the webhook
             # already performs on the ladder, applied to the envelope's view of it.
-            promises.pop(debtor_id, None)
+            #
+            # Only the invoice the promise was made on closes it. Both rows are keyed on
+            # the debtor, so paying invoice B used to cancel an open promise running on
+            # invoice A and resume chasing a debtor who had broken nothing. A promise with
+            # no invoice recorded is closed by any settlement, which is the old behaviour.
+            open_promise = promises.get(debtor_id)
+            if open_promise is not None and open_promise[2] in (None, event.get("invoice_id")):
+                promises.pop(debtor_id, None)
+            # The escalation count is deliberately NOT reset here. `decision.made` carries no
+            # invoice, so any reset can only be debtor-wide, and a small payment on invoice E
+            # would refill the ceiling the agent had already spent on invoice A - a safety
+            # limit that an unrelated event tops up is worse than one that never resets. The
+            # cost is that a debtor who once reached the ceiling stays on HUMAN_HANDOFF for
+            # escalation, which is a human deciding rather than the agent escalating.
+            # Revisit when a decision row can name the invoice or cycle it belongs to.
+            #
+            # The promise budget IS reset, and the asymmetry is the point: the escalation
+            # ceiling protects the debtor from the agent, so refilling it does harm, while
+            # the promise budget protects recovery from the debtor, and a debtor who has
+            # actually paid has earned the right to commit again.
+            promise_windows[debtor_id] = 0
 
     # Warned, never recorded. This function reads the audit log on every decision, so an
     # audit.record here would append a row to the very file being folded — one new row per
@@ -150,6 +204,14 @@ def build(
     if undated:
         logger.warning(
             "contact history skipped %d undated event(s) as of %s", undated, as_of.isoformat()
+        )
+    if extensions_refused or windows_exhausted:
+        logger.warning(
+            "contact history ignored %d promise extension(s) and stopped honouring promises "
+            "for %s after %d window(s) without a settlement",
+            extensions_refused,
+            sorted(windows_exhausted) or "nobody",
+            MAX_PROMISE_WINDOWS_WITHOUT_SETTLEMENT,
         )
     if unparsable_promise_dates:
         logger.warning(
