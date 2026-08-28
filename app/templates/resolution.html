@@ -34,7 +34,7 @@
     <summary>Something is wrong with this invoice</summary>
     <div>
       <label class="small muted" for="dispute-reason">What is the problem? Up to {{ dispute_reason_max }} characters.</label>
-      <textarea id="dispute-reason" placeholder="For example: the goods were short delivered, or this was already paid by NEFT on 12 August."></textarea>
+      <textarea id="dispute-reason" maxlength="{{ dispute_reason_max }}" placeholder="For example: the goods were short delivered, or this was already paid by NEFT on 12 August."></textarea>
       <button id="dispute">Raise a dispute</button>
       <div id="dispute-status"></div>
     </div>
@@ -127,8 +127,13 @@
   });
 
   document.getElementById("promise").addEventListener("click", async () => {
-    const value = document.getElementById("promised-date").value;
+    const field = document.getElementById("promised-date");
+    const value = field.value;
     if (!value) { show("promise-status", "Pick a date first.", false); return; }
+    if (value < field.min || value > field.max) {
+      show("promise-status", "Pick a date between " + field.min + " and " + field.max + ".", false);
+      return;
+    }
     try {
       await postJSON("/api/promise", { token: TOKEN, promised_date: value });
       show("promise-status", "Noted. We will check back on " + value + ".", true);
