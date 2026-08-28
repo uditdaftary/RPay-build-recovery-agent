@@ -191,7 +191,8 @@ def decide_for_debtor(
     # own prebuilt map so the log is folded once instead of once per debtor.
     if history is None:
         history = contact_history.build(
-            date.fromisoformat(as_of_date), only_debtor=debtor_id
+            contact_history.history_as_of(date.fromisoformat(as_of_date)),
+            only_debtor=debtor_id,
         ).get(debtor_id, NO_HISTORY)
 
     envelope: EnvelopeResult = evaluate_envelope(debtor, invoices, merchant, history=history)
@@ -504,8 +505,12 @@ def run_strategist_batch(
     decisions: list[StrategistDecision] = []
 
     as_of_date = ledger.get("as_of", AS_OF.isoformat())
-    # Folded once for the whole batch rather than re-read per debtor.
-    histories = contact_history.build(date.fromisoformat(as_of_date))
+    # Folded once for the whole batch rather than re-read per debtor. The fold date is not
+    # the ledger's: invoice ageing stays pinned, but promises and settlements arrive on the
+    # wall clock and are discarded by the fold's own cutoff if it sits in the past.
+    histories = contact_history.build(
+        contact_history.history_as_of(date.fromisoformat(as_of_date))
+    )
 
     for debtor in debtors:
         d_invoices = invoices_by_debtor.get(debtor["debtor_id"], [])

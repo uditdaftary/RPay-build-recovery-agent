@@ -23,10 +23,18 @@ from datetime import date, datetime
 from typing import Any
 
 from app import audit
-from app.config import BUSINESS_TZ
+from app.config import BUSINESS_TZ, business_today
 from app.envelope import Channel, DebtorHistory, Strategy
 
 logger = logging.getLogger(__name__)
+
+# How many separate suppression windows one debtor may open without a payment landing in
+# between. `/api/promise` is public and unauthenticated, and an open promise excludes every
+# money ask, so without this a debtor keeps recovery switched off by promising again each
+# time the last date passes. Two broken commitments is already the pattern; the third is not
+# honoured and the agent resumes. A settlement resets the count, because money landing is the
+# thing the promise was for.
+MAX_PROMISE_WINDOWS_WITHOUT_SETTLEMENT = 2
 
 
 def _parse_date(raw: Any) -> date | None:
@@ -43,6 +51,27 @@ def _parse_date(raw: Any) -> date | None:
     except ValueError:
         return None
     return (parsed.astimezone(BUSINESS_TZ) if parsed.tzinfo else parsed).date()
+
+
+def history_as_of(ledger_as_of: date, today: date | None = None) -> date:
+    """The date the audit fold is taken at, given the ledger's pinned `as_of`.
+
+    Two different clocks meet here. Invoice ageing is pinned to the ledger's `as_of` so the
+    experiment is reproducible, but the resolution page stamps a promise, a dispute or a
+    settlement with the wall clock. Folding real events at a pinned date in the past means
+    `build`'s own cutoff discards every one of them, so a debtor who commits to a payment
+    date is invisible to the cooldown, escalation and open-promise rules — the end-to-end
+    "debtor promises, agent stops chasing" path could never fire once the wall clock passed
+    the seeded date, which it already had.
+
+    The later of the two: the ledger's date while the experiment is still in its own present,
+    the real date once the world has moved past it.
+
+    `today` is injectable because this is the one place a decision batch stops being a pure
+    function of its seed. A caller that needs a run pinned - a test, or a demo that must
+    reproduce a recorded result - passes the date rather than monkeypatching the clock.
+    """
+    return max(ledger_as_of, today or business_today())
 
 
 def build(
