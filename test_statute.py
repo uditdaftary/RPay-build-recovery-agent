@@ -41,7 +41,6 @@ class TestStatuteAndDisputes(unittest.TestCase):
         acceptance, statutory_due, appointed = compute_statutory_dates(
             delivery_date=delivery,
             written_agreement=False,
-            objection_raised_within_15d=False,
         )
         self.assertEqual(acceptance, delivery, "Silence for 15 days is deemed acceptance on delivery date")
         self.assertEqual(statutory_due, delivery + timedelta(days=15), "Default statutory window is 15 calendar days")
@@ -53,7 +52,6 @@ class TestStatuteAndDisputes(unittest.TestCase):
         acceptance, statutory_due, appointed = compute_statutory_dates(
             delivery_date=delivery,
             written_agreement=True,
-            objection_raised_within_15d=False,
         )
         self.assertEqual(acceptance, delivery)
         self.assertEqual(statutory_due, delivery + timedelta(days=45), "Written agreement window is 45 calendar days")
@@ -62,11 +60,12 @@ class TestStatuteAndDisputes(unittest.TestCase):
     def test_statutory_dates_with_objection_inside_15d_moves_acceptance(self) -> None:
         """Written objection raised within 15 days moves acceptance date to objection resolution date."""
         delivery = date(2026, 8, 1)
+        objection = date(2026, 8, 10)  # Raised 9 days after delivery, inside the window
         resolution = date(2026, 8, 20)  # Resolved 19 days later
         acceptance, statutory_due, appointed = compute_statutory_dates(
             delivery_date=delivery,
             written_agreement=True,
-            objection_raised_within_15d=True,
+            objection_date=objection,
             resolution_date=resolution,
         )
         self.assertEqual(acceptance, resolution, "Acceptance date moves to the date objection is resolved")
@@ -79,12 +78,31 @@ class TestStatuteAndDisputes(unittest.TestCase):
         acceptance, statutory_due, appointed = compute_statutory_dates(
             delivery_date=delivery,
             written_agreement=True,
-            objection_raised_within_15d=True,
+            objection_date=date(2026, 8, 10),
             resolution_date=None,
         )
         self.assertIsNone(acceptance)
         self.assertIsNone(statutory_due)
         self.assertIsNone(appointed)
+
+    def test_statutory_dates_objection_after_15d_is_reachable_through_the_wrapper(self) -> None:
+        """A late objection (after day 15) must still deem acceptance on delivery, via this function.
+
+        A prior version of compute_statutory_dates hardcoded the objection date to always
+        fall one day after delivery, which made this branch unreachable except by calling
+        recompute_statutory_dates_on_dispute directly.
+        """
+        delivery = date(2026, 8, 1)
+        late_objection = date(2026, 8, 21)  # Day 20, after the 15-day window
+        acceptance, statutory_due, appointed = compute_statutory_dates(
+            delivery_date=delivery,
+            written_agreement=True,
+            objection_date=late_objection,
+            resolution_date=date(2026, 9, 1),
+        )
+        self.assertEqual(acceptance, delivery, "Late objection does not move deemed acceptance")
+        self.assertEqual(statutory_due, delivery + timedelta(days=45))
+        self.assertEqual(appointed, delivery + timedelta(days=46))
 
     def test_statutory_dates_boundary_edges(self) -> None:
         """Test boundary transitions: 14d, 15d, 16d, 44d, 45d, 46d."""

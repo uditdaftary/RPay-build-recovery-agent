@@ -100,12 +100,14 @@ def recompute_statutory_dates_on_dispute(
             return None, None, None
 
         acceptance = resolution_date
-        statutory_due = acceptance + timedelta(days=window)
-        appointed = acceptance + timedelta(days=16) if not written_agreement else statutory_due + timedelta(days=1)
-        return acceptance, statutory_due, appointed
+    else:
+        # Objection was raised after 15 days: deemed acceptance on delivery date stands
+        acceptance = delivery_date
 
-    # Objection was raised after 15 days: deemed acceptance on delivery date stands
-    acceptance = delivery_date
     statutory_due = acceptance + timedelta(days=window)
-    appointed = acceptance + timedelta(days=16) if not written_agreement else statutory_due + timedelta(days=1)
+    # The appointed day is the day after the statutory due date in both branches — there is
+    # no separate "15 days from acceptance" formula to restate: window is 15 in the
+    # no-written-agreement case, so acceptance + 16 and statutory_due + 1 are the same date.
+    # One expression means a change to the window constant cannot desync it from this line.
+    appointed = statutory_due + timedelta(days=1)
     return acceptance, statutory_due, appointed

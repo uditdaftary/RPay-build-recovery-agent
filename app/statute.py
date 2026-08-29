@@ -78,15 +78,25 @@ class Section43BHEvaluation:
 def compute_statutory_dates(
     delivery_date: date,
     written_agreement: bool,
-    objection_raised_within_15d: bool = False,
+    objection_date: date | None = None,
     resolution_date: date | None = None,
 ) -> tuple[date | None, date | None, date | None]:
-    """Compute statutory acceptance date, due date, and appointed day under MSMED s.15."""
-    if objection_raised_within_15d:
+    """Compute statutory acceptance date, due date, and appointed day under MSMED s.15.
+
+    `objection_date` is None when no written objection was ever raised — silence deems
+    acceptance on the delivery date. When one was raised, pass its real date; whether it
+    falls inside the 15-day window is derived in `recompute_statutory_dates_on_dispute`
+    from that date, not asserted separately by the caller. A prior version took a
+    `objection_raised_within_15d: bool` flag instead and, having no date to check it
+    against, hardcoded one exactly one day after delivery — always inside the window,
+    so the "objection raised after 15 days" branch below was unreachable through this
+    function no matter what the caller actually intended.
+    """
+    if objection_date is not None:
         return recompute_statutory_dates_on_dispute(
             delivery_date=delivery_date,
             written_agreement=written_agreement,
-            objection_date=delivery_date + timedelta(days=1),
+            objection_date=objection_date,
             resolution_date=resolution_date,
         )
 
@@ -95,7 +105,7 @@ def compute_statutory_dates(
         STATUTORY_WINDOW_WRITTEN_DAYS if written_agreement else STATUTORY_WINDOW_DEFAULT_DAYS
     )
     statutory_due = acceptance + timedelta(days=window)
-    appointed = acceptance + timedelta(days=16) if not written_agreement else statutory_due + timedelta(days=1)
+    appointed = statutory_due + timedelta(days=1)
     return acceptance, statutory_due, appointed
 
 
