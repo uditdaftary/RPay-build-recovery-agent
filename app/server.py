@@ -181,7 +181,7 @@ def format_inr(paise: int) -> str:
 
 def _find_invoice(order_id: str) -> tuple[str, dict] | tuple[None, None]:
     for token, invoice in INVOICES.items():
-        if invoice.get("razorpay_order_id") == order_id:
+        if order_id in invoice.get("razorpay_order_ids", ()):
             return token, invoice
     return None, None
 
@@ -339,7 +339,7 @@ def create_order(body: CreateOrderRequest) -> JSONResponse:
         audit.record("order.failed", invoice_id=invoice["invoice_id"], error=repr(exc))
         return JSONResponse({"error": "could not reach the payment gateway"}, status_code=502)
 
-    invoice["razorpay_order_id"] = order["id"]
+    invoice.setdefault("razorpay_order_ids", []).append(order["id"])
     audit.record(
         "order.created",
         invoice_id=invoice["invoice_id"],
