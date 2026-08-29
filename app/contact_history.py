@@ -25,8 +25,13 @@ from typing import Any
 from app import audit
 from app.config import BUSINESS_TZ, business_today
 from app.envelope import Channel, DebtorHistory, Strategy
+from app.ledger import InvoiceState
 
 logger = logging.getLogger(__name__)
+
+# Audit events that credit money against an invoice. Both raise `amount_received_paise` in
+# the projection below; the only difference is which one the webhook writes.
+SETTLEMENT_EVENTS = frozenset({"settlement.confirmed", "settlement.partial"})
 
 # How many separate suppression windows one debtor may open without a payment landing in
 # between. `/api/promise` is public and unauthenticated, and an open promise excludes every
@@ -72,6 +77,66 @@ def history_as_of(ledger_as_of: date, today: date | None = None) -> date:
     reproduce a recorded result - passes the date rather than monkeypatching the clock.
     """
     return max(ledger_as_of, today or business_today())
+
+
+def live_invoice_state(
+    invoices: list[dict[str, Any]], events: list[dict[str, Any]], as_of: date
+) -> list[dict[str, Any]]:
+    """Project settlements from the audit log onto a copy of the invoice list.
+
+    The envelope reads `collectible = amount - amount_received - tds` per invoice, so a
+    settlement credited here raises `amount_received_paise` and the paid money leaves every
+    downstream gate: a full payment drops the invoice out of collectible entirely, a partial
+    leaves the remainder chaseable and marks the invoice PARTIALLY_PAID so the negotiation
+    rule still applies to it.
+
+    Never mutates its input. The seeded ledger is the experiment's starting position and has
+    to stay byte-identical, so this returns fresh dicts for the invoices it touches and the
+    originals untouched for the rest.
+
+    This is the one call that makes a decision depend on wall-clock settlements rather than
+    the seed, which is why `run_strategist_batch` keeps it off by default and only the demo
+    turns it on. Folding it into the experiment would make the uplift number a function of
+    the audit log's contents. Dedup is on `payment_id` because Razorpay redelivers webhooks
+    and a replayed partial would otherwise be counted twice.
+    """
+    settled: dict[str, int] = {}
+    seen: set[str] = set()
+    for event in events:
+        if event.get("event") not in SETTLEMENT_EVENTS:
+            continue
+        invoice_id = event.get("invoice_id")
+        if not invoice_id:
+            continue
+        stamped = _parse_date(event.get("ts"))
+        if stamped is None or stamped > as_of:
+            continue
+        payment_id = event.get("payment_id")
+        if payment_id is not None:
+            key = f"{invoice_id}:{payment_id}"
+            if key in seen:
+                continue
+            seen.add(key)
+        settled[invoice_id] = settled.get(invoice_id, 0) + int(event.get("amount_paise", 0))
+
+    projected: list[dict[str, Any]] = []
+    for invoice in invoices:
+        credited = settled.get(invoice["invoice_id"], 0)
+        if not credited:
+            projected.append(invoice)
+            continue
+        updated = dict(invoice)
+        updated["amount_received_paise"] = invoice.get("amount_received_paise", 0) + credited
+        remaining = (
+            updated["amount_paise"]
+            - updated["amount_received_paise"]
+            - updated.get("tds_deducted_paise", 0)
+        )
+        updated["state"] = str(
+            InvoiceState.PAID if remaining <= 0 else InvoiceState.PARTIALLY_PAID
+        )
+        projected.append(updated)
+    return projected
 
 
 def build(
