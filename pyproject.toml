@@ -1,0 +1,28 @@
+# Lint and typecheck gates. Tests were the only one this project had, so every "checks
+# pass" claim covered one gate of three. Deliberately narrow: rules that catch real
+# defects, not a style argument mid-build.
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes: undefined and unused names
+    "I",    # import ordering
+    "B",    # bugbear: mutable defaults, shadowed loop vars, except-without-raise
+    "UP",   # pyupgrade
+    "SIM",  # simplifiable branches
+    "DTZ",  # naive datetimes, which this codebase has already been bitten by
+]
+ignore = [
+    "E501",   # line length is reported by the formatter, not worth failing a build over
+    "SIM108", # a ternary is not always the clearer branch, and this codebase leans on
+              # commented if/else in the statutory date arithmetic
+]
+
+[tool.ruff.lint.per-file-ignores]
+# The suites import inside test functions on purpose, to keep app.server out of the
+# import graph for the offline checks that do not touch it. That is PLC0415 only; E402
+# is not needed, because every module-level import in these files is at the top.
+"test_*.py" = ["PLC0415"]

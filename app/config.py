@@ -6,6 +6,7 @@ instead, so the checkout path stays runnable before those are provisioned.
 """
 
 import os
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -36,11 +37,27 @@ LLM_MODEL = os.getenv("LLM_MODEL", "gemini-3.6-flash").strip()
 #                     also 504'd at 122s, so it is unavailable rather than slow.
 #   gemini-3.6-flash  3/3 succeeded, median 7.4s   <- primary
 #   gemini-3.5-flash  3/3 succeeded, median 6.5s
-# All models that answered returned the same verdict, so the chain affects whether a
-# decision arrives, not what it is. Tried in order on a retryable error.
+#   gemini-flash-latest  answered, then 503'd once under load
+#
+# Observed Aug 27 during the Day 2 decision batch (audit/events.jsonl, 17 failovers and
+# one exhaustion): the primary gemini-3.6-flash served ZERO calls, returning 429 or 504
+# on every attempt, and gemini-3.5-flash-lite served roughly half the decisions. So the
+# Aug 26 medians above describe a quieter key than the one in use.
+#
+# NOT YET MEASURED: gemini-3.5-flash-lite and gemini-3.1-flash-lite. They were added for
+# 503 capacity headroom, but the "all models that answered returned the same verdict"
+# parity check was only ever run across the 3.7/3.6/3.5 tier, never against the lite tier.
+# A lite model is materially weaker, so until that parity is re-measured, treat any number
+# produced while a lite model was serving as provisional. Re-measure before the demo.
+#
+# gemini-flash-latest stays last on purpose: it is the only floating alias in the chain,
+# so it is the one entry that survives a pinned version being retired.
 LLM_FALLBACK_MODELS = [
     name.strip()
-    for name in os.getenv("LLM_FALLBACK_MODELS", "gemini-3.5-flash,gemini-flash-latest").split(",")
+    for name in os.getenv(
+        "LLM_FALLBACK_MODELS",
+        "gemini-3.5-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-flash-latest",
+    ).split(",")
     if name.strip()
 ]
 
@@ -50,3 +67,16 @@ LLM_FALLBACK_MODELS = [
 LLM_TIMEOUT_MS = int(os.getenv("LLM_TIMEOUT_MS", "20000"))
 
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
+
+
+# The whole book is Indian receivables, so a business day here is an IST day. Pinned rather
+# than taken from the host clock: a server in UTC would call everything between 00:00 and
+# 05:30 IST yesterday, which is exactly the drift that once made a contact look a day older
+# than it was and lifted a cooldown early. Both the audit fold and the promise endpoint read
+# their "today" from here so the two cannot disagree.
+BUSINESS_TZ = timezone(timedelta(hours=5, minutes=30))
+
+
+def business_today() -> date:
+    """Today, as the business reckons it."""
+    return datetime.now(BUSINESS_TZ).date()

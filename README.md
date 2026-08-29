@@ -20,7 +20,7 @@ with a full audit trail, measured against a fixed baseline policy on an identica
 | Append-only audit log | Working |
 | Seeded ledger, 70 invoices under 20 debtors | Working, reproducible from a seed |
 | Model failover across a model chain | Working |
-| Policy envelope, strategist, baseline runner | Not built yet |
+| Policy envelope, strategist, baseline runner | Working, checked offline. All eleven guardrails enforced |
 
 One gap worth naming: the card has not been pushed through Razorpay's checkout iframe
 end to end. Everything either side of it is verified, including signature verification
@@ -45,7 +45,7 @@ cp .env.example .env
 | `RAZORPAY_WEBHOOK_SECRET` | Webhooks only | Set by you when creating the webhook. **Not the key secret.** |
 | `GOOGLE_API_KEY` | The decision engine | https://aistudio.google.com/apikey |
 | `LLM_MODEL` | The decision engine | Defaults to `gemini-3.6-flash` |
-| `LLM_FALLBACK_MODELS` | Surviving a model outage | Defaults to `gemini-3.5-flash,gemini-flash-latest` |
+| `LLM_FALLBACK_MODELS` | Surviving a model outage | Defaults to `gemini-3.5-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-flash-latest`. The two `-lite` entries are unmeasured capacity headroom |
 | `LLM_TIMEOUT_MS` | Bounding a slow call | Defaults to `20000` |
 
 Note that `gemini-2.5-flash` appears in `models.list()` but returns 404 on
@@ -84,6 +84,52 @@ seeds diverge, that all four failure states are present, that TDS invoices recon
 face value, that the statutory window is measured from acceptance, that exactly one
 merchant can invoke the statute, and that the hidden behaviour parameters never reach the
 agent's view.
+
+It also checks the committed `data/ledger.json` against what the seed produces now. The two
+can drift, and did: a clamp on `avg_days_late` changed the generator without the file being
+regenerated, so every number was measured on a ledger the seed no longer produced. Comparing
+one generated ledger with another only proves the generator is deterministic.
+
+```bash
+python -m ruff check .
+```
+
+Lint. Tests were the only gate this project had, so every "checks pass" claim covered one
+of three. The rule set is deliberately narrow: unused and undefined names, import order,
+bugbear, and `DTZ`, which flags a naive datetime — the class of bug that already cost this
+codebase a day-early cooldown.
+
+```bash
+python test_decisions.py
+```
+
+Checks that the hard policy envelope enforces deterministic guardrails (opt-out permanent
+suppression, active dispute protection, MSMED trader refusal, TDS reconciliation, VIP
+relationship protection that fails closed on unknown account value, no money ask on an
+account already settled off-rail, a seven-day contact cooldown, an escalation ceiling, no
+chasing inside a promise that has not fallen due, and every independent exclusion ground
+surviving into the audit trail), that hidden behaviour parameters cannot reach a decision
+and a debtor row
+without an opt-out flag is refused outright, that a prohibited strategy and an ask outside
+the pre-authorised band are both intercepted **and** left flagged for human review — the
+band is bounded below by the concession floor and above by the collectible balance, so the
+agent can neither invent a discount nor demand withheld TDS back, and a strategy that asks
+for no money cannot carry an amount at all. Delivery is typed too: an unknown channel or a
+deadline that is prose rather than a date fails validation, and a deadline already past is
+dropped. Both decision paths write one `decision.made` shape, so the results page can read
+every row alike. The baseline policy is checked to progress on calendar days overdue.
+
+Runs offline with no model calls, so it costs nothing and cannot flake on a rate limit. The
+live batch against the real model chain is opt-in:
+
+```bash
+RUN_LIVE_LLM_CHECKS=1 python test_decisions.py
+```
+
+It prints a per-case agent-versus-baseline table rather than asserting a divergence count.
+Divergence measures difference, not correctness: the baseline escalates all 20 debtors, so
+an agent that always answered `WAIT` would score 100%. The number that belongs in the pitch
+is the per-case adjudication, including the cases where the agent loses.
 
 ### Razorpay test instruments
 
@@ -148,9 +194,14 @@ no other module imports `google.genai`.
 Primary is `gemini-3.6-flash`. Every model that answered returned the same verdict on the
 same prompt, so the fallback chain changes
 whether a decision arrives, not what it is. Calls fail over across the chain on a bounded
-clock and `llm.failover` is written to the audit log naming the model that answered. A
-client-side read timeout is not an `APIError`, so it is caught explicitly; without that it
-would bypass the chain entirely, which is the exact failure the chain exists to survive.
+clock and `llm.failover` is written to the audit log naming the model that answered.
+
+Two failures bypass a naive chain, and both are handled here because both were seen. A
+client-side read timeout is not an `APIError`, so it is caught explicitly. And a model can
+answer with no text at all when a candidate is blocked, stopped on safety or truncated:
+no exception is raised, so an empty body was returned as though it were an answer and the
+chain never fired. Ten of the first 146 decisions took that path and were recorded as the
+agent choosing to wait. An empty body is now a failure that moves to the next model.
 
 **The ledger separates what the agent sees from what is true.** Each debtor carries hidden
 behaviour parameters fixed by the seed. `Debtor.agent_view()` is the only projection the
@@ -167,6 +218,10 @@ deploy.
 app/
   config.py            environment, fails loudly on missing Razorpay credentials
   ledger.py            seeded synthetic ledger, hidden behaviour params, statutory dates
+  envelope.py          hard policy envelope, deterministic guardrails, action classes
+  contact_history.py   cooldown, intensity and open promises, derived from the audit log
+  strategist.py        AI recovery strategist, per-debtor structured decision engine
+  baseline.py          calendar-based baseline policy runner
   razorpay_gateway.py  order creation, both signature verifications
   llm.py               single model call site, model failover
   audit.py             append-only JSONL event log
@@ -174,4 +229,5 @@ app/
   templates/           debtor resolution page
 data/ledger.json       generated ledger, committed so results are reproducible
 test_signatures.py     runnable checks for the money path
+test_decisions.py      runnable checks for the envelope, baseline, and decision divergence
 ```

@@ -12,8 +12,9 @@ rather than agreeing with whatever the code happens to do.
 import hashlib
 import hmac
 import json
+from contextlib import contextmanager
 
-from app import config, razorpay_gateway
+from app import razorpay_gateway
 
 PAYMENT_SECRET = "test_secret_do_not_use"
 WEBHOOK_SECRET = "whsec_test_do_not_use"
@@ -26,62 +27,84 @@ def sign(message: bytes, secret: str) -> str:
     return hmac.new(secret.encode(), message, hashlib.sha256).hexdigest()
 
 
+@contextmanager
+def _with_config(**overrides: str):
+    """Temporarily set config values, restoring originals on exit."""
+    originals = {}
+    for key, value in overrides.items():
+        originals[key] = getattr(razorpay_gateway.config, key)
+        setattr(razorpay_gateway.config, key, value)
+    try:
+        yield
+    finally:
+        for key, value in originals.items():
+            setattr(razorpay_gateway.config, key, value)
+
+
 def test_payment_signature() -> None:
-    config.RAZORPAY_KEY_SECRET = PAYMENT_SECRET
-    razorpay_gateway.config.RAZORPAY_KEY_SECRET = PAYMENT_SECRET
+    with _with_config(RAZORPAY_KEY_SECRET=PAYMENT_SECRET):
+        order_id, payment_id = "order_ABC123", "pay_XYZ789"
+        good = sign(f"{order_id}|{payment_id}".encode(), PAYMENT_SECRET)
 
-    order_id, payment_id = "order_ABC123", "pay_XYZ789"
-    good = sign(f"{order_id}|{payment_id}".encode(), PAYMENT_SECRET)
+        assert good == KNOWN_PAYMENT_SIGNATURE, "algorithm drifted from the documented one"
+        assert razorpay_gateway.verify_payment_signature(order_id, payment_id, good)
 
-    assert good == KNOWN_PAYMENT_SIGNATURE, "algorithm drifted from the documented one"
-    assert razorpay_gateway.verify_payment_signature(order_id, payment_id, good)
-
-    # A payment id swapped after signing must not verify.
-    assert not razorpay_gateway.verify_payment_signature(order_id, "pay_TAMPERED", good)
-    # An order id swapped after signing must not verify.
-    assert not razorpay_gateway.verify_payment_signature("order_TAMPERED", payment_id, good)
-    # A signature made with a different secret must not verify.
-    forged = sign(f"{order_id}|{payment_id}".encode(), "attacker_secret")
-    assert not razorpay_gateway.verify_payment_signature(order_id, payment_id, forged)
-    # Missing pieces are a rejection, never an exception.
-    assert not razorpay_gateway.verify_payment_signature(order_id, payment_id, "")
-    assert not razorpay_gateway.verify_payment_signature("", payment_id, good)
+        # A payment id swapped after signing must not verify.
+        assert not razorpay_gateway.verify_payment_signature(order_id, "pay_TAMPERED", good)
+        # An order id swapped after signing must not verify.
+        assert not razorpay_gateway.verify_payment_signature("order_TAMPERED", payment_id, good)
+        # A signature made with a different secret must not verify.
+        forged = sign(f"{order_id}|{payment_id}".encode(), "attacker_secret")
+        assert not razorpay_gateway.verify_payment_signature(order_id, payment_id, forged)
+        # Missing pieces are a rejection, never an exception.
+        assert not razorpay_gateway.verify_payment_signature(order_id, payment_id, "")
+        assert not razorpay_gateway.verify_payment_signature("", payment_id, good)
 
     print("ok  payment signature")
 
 
 def test_webhook_signature() -> None:
-    razorpay_gateway.config.RAZORPAY_WEBHOOK_SECRET = WEBHOOK_SECRET
+    with _with_config(RAZORPAY_WEBHOOK_SECRET=WEBHOOK_SECRET):
+        raw = b'{"event":"payment.captured"}'
+        good = sign(raw, WEBHOOK_SECRET)
 
-    raw = b'{"event":"payment.captured"}'
-    good = sign(raw, WEBHOOK_SECRET)
+        assert good == KNOWN_WEBHOOK_SIGNATURE, "algorithm drifted from the documented one"
+        assert razorpay_gateway.verify_webhook_signature(raw, good)
 
-    assert good == KNOWN_WEBHOOK_SIGNATURE, "algorithm drifted from the documented one"
-    assert razorpay_gateway.verify_webhook_signature(raw, good)
+        # The webhook secret is not the key secret. Signing with the wrong one must fail.
+        assert not razorpay_gateway.verify_webhook_signature(raw, sign(raw, PAYMENT_SECRET))
 
-    # The webhook secret is not the key secret. Signing with the wrong one must fail.
-    assert not razorpay_gateway.verify_webhook_signature(raw, sign(raw, PAYMENT_SECRET))
+        # The classic bug: verifying a re-serialised body instead of the received bytes.
+        # json.dumps adds spaces, the digest changes, and every real webhook reads as forged.
+        reserialised = json.dumps(json.loads(raw)).encode()
+        assert reserialised != raw, "test is meaningless if these match"
+        assert not razorpay_gateway.verify_webhook_signature(reserialised, good)
 
-    # The classic bug: verifying a re-serialised body instead of the received bytes.
-    # json.dumps adds spaces, the digest changes, and every real webhook reads as forged.
-    reserialised = json.dumps(json.loads(raw)).encode()
-    assert reserialised != raw, "test is meaningless if these match"
-    assert not razorpay_gateway.verify_webhook_signature(reserialised, good)
-
-    assert not razorpay_gateway.verify_webhook_signature(raw, "")
+        assert not razorpay_gateway.verify_webhook_signature(raw, "")
 
     print("ok  webhook signature")
 
 
+def test_payment_secret_required() -> None:
+    with _with_config(RAZORPAY_KEY_SECRET=""):
+        try:
+            razorpay_gateway.verify_payment_signature("order_X", "pay_Y", "abc")
+        except RuntimeError as exc:
+            assert "RAZORPAY_KEY_SECRET" in str(exc)
+            print("ok  missing payment secret fails loudly")
+            return
+        raise AssertionError("an unset payment secret must raise, not silently accept or reject")
+
+
 def test_webhook_secret_required() -> None:
-    razorpay_gateway.config.RAZORPAY_WEBHOOK_SECRET = ""
-    try:
-        razorpay_gateway.verify_webhook_signature(b"{}", "abc")
-    except RuntimeError as exc:
-        assert "RAZORPAY_WEBHOOK_SECRET" in str(exc)
-        print("ok  missing webhook secret fails loudly")
-        return
-    raise AssertionError("an unset webhook secret must raise, not silently accept or reject")
+    with _with_config(RAZORPAY_WEBHOOK_SECRET=""):
+        try:
+            razorpay_gateway.verify_webhook_signature(b"{}", "abc")
+        except RuntimeError as exc:
+            assert "RAZORPAY_WEBHOOK_SECRET" in str(exc)
+            print("ok  missing webhook secret fails loudly")
+            return
+        raise AssertionError("an unset webhook secret must raise, not silently accept or reject")
 
 
 def test_amount_validation() -> None:
@@ -127,6 +150,7 @@ def test_health_endpoint() -> None:
 if __name__ == "__main__":
     test_payment_signature()
     test_webhook_signature()
+    test_payment_secret_required()
     test_webhook_secret_required()
     test_amount_validation()
     test_inr_formatting()

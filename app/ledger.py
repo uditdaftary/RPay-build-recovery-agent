@@ -25,11 +25,12 @@ import argparse
 import hashlib
 import json
 import random
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import date, timedelta
 from enum import StrEnum
 from pathlib import Path
 
+from app import audit
 from app.config import PROJECT_ROOT
 
 # The ledger is generated relative to a fixed "today" so that runs are reproducible
@@ -106,6 +107,53 @@ class BehaviourParams:
     habitual_days_late: int
 
 
+# MSMED s.15 statutory windows, in days from acceptance. 45 where a written agreement fixes
+# a payment term, 15 otherwise. Named once because the generator, the self check and the
+# envelope's escalation-age gate all read the same number and were free to drift apart.
+STATUTORY_WINDOW_WRITTEN_DAYS = 45
+STATUTORY_WINDOW_DEFAULT_DAYS = 15
+
+
+AGENT_VISIBLE_FIELDS = (
+    "debtor_id",
+    "name",
+    "relationship_since",
+    "trailing_12m_value_paise",
+    "preferred_channel",
+    "language",
+    "opted_out",
+    "promises_made",
+    "promises_kept",
+    "prior_disputes",
+    "avg_days_late",
+)
+
+
+def agent_view(debtor: dict) -> dict:
+    """Project a debtor down to what the agent may see. Excludes `behaviour` by design.
+
+    A whitelist, not a blacklist, and the single source of truth for the projection. The
+    ledger is serialised with `asdict`, so a debtor loaded back from `data/ledger.json` is
+    a plain dict still carrying the hidden parameters — every path that hands a debtor to
+    the strategist or the envelope must come through here, or the reported recovery number
+    is something the author chose rather than something the agent earned.
+
+    `opted_out` is required rather than merely copied when present. Dropping it silently
+    would let the envelope's suppression check see nothing at all, and a projection is not
+    allowed to be the reason someone who opted out gets chased again.
+    """
+    if "opted_out" not in debtor:
+        debtor_id = debtor.get("debtor_id", "<unknown>")
+        # Logged before raising, so a run that stops here explains itself in the same place
+        # the unknown-merchant refusal does. A stack trace is not an audit trail.
+        audit.record("ledger.unprojectable_debtor", debtor_id=debtor_id, missing_field="opted_out")
+        raise KeyError(
+            f"debtor {debtor_id} has no `opted_out` field; "
+            "suppression cannot be evaluated and the row must not reach the agent"
+        )
+    return {name: debtor[name] for name in AGENT_VISIBLE_FIELDS if name in debtor}
+
+
 @dataclass
 class Debtor:
     debtor_id: str
@@ -124,19 +172,7 @@ class Debtor:
 
     def agent_view(self) -> dict:
         """The only projection the strategist may see. Excludes `behaviour` by design."""
-        return {
-            "debtor_id": self.debtor_id,
-            "name": self.name,
-            "relationship_since": self.relationship_since,
-            "trailing_12m_value_paise": self.trailing_12m_value_paise,
-            "preferred_channel": self.preferred_channel,
-            "language": self.language,
-            "opted_out": self.opted_out,
-            "promises_made": self.promises_made,
-            "promises_kept": self.promises_kept,
-            "prior_disputes": self.prior_disputes,
-            "avg_days_late": self.avg_days_late,
-        }
+        return agent_view(vars(self))
 
 
 @dataclass
@@ -245,7 +281,7 @@ def _build_debtors(rng: random.Random, merchants: list[Merchant]) -> list[Debtor
                 promises_made=promises_made,
                 promises_kept=promises_kept,
                 prior_disputes=rng.choice([0, 0, 0, 1, 1, 2]),
-                avg_days_late=round(habitual + rng.uniform(-2, 3), 1),
+                avg_days_late=max(0.0, round(habitual + rng.uniform(-2, 3), 1)),
                 behaviour=BehaviourParams(
                     pay_propensity=round(rng.uniform(0.10, 0.75), 3),
                     email_responsiveness=round(rng.uniform(0.05, 0.70), 3),
@@ -277,7 +313,9 @@ def _statutory_dates(
         acceptance = delivery + timedelta(days=rng.randint(16, 40))
     else:
         acceptance = delivery
-    window = 45 if written_agreement else 15
+    window = (
+        STATUTORY_WINDOW_WRITTEN_DAYS if written_agreement else STATUTORY_WINDOW_DEFAULT_DAYS
+    )
     statutory_due = acceptance + timedelta(days=window)
     return acceptance, statutory_due, statutory_due + timedelta(days=1)
 
@@ -452,7 +490,11 @@ def _self_check() -> None:
     for inv in invoices:
         acceptance = date.fromisoformat(inv["acceptance_date"])
         statutory = date.fromisoformat(inv["statutory_due_date"])
-        expected = 45 if inv["written_agreement"] else 15
+        expected = (
+            STATUTORY_WINDOW_WRITTEN_DAYS
+            if inv["written_agreement"]
+            else STATUTORY_WINDOW_DEFAULT_DAYS
+        )
         assert (statutory - acceptance).days == expected, "statutory window miscomputed"
 
     # Exactly one merchant may invoke the statute; the trader may not.
@@ -462,6 +504,18 @@ def _self_check() -> None:
     # The agent must never be handed the hidden parameters.
     debtor = Debtor(**{**a["debtors"][0], "behaviour": BehaviourParams(**a["debtors"][0]["behaviour"])})
     assert "behaviour" not in debtor.agent_view(), "hidden parameters leaked into the agent view"
+
+    # The tracked artifact must still be what the seed produces. Comparing generate(42) to
+    # generate(42) only proves the generator is deterministic; it says nothing about the file
+    # every reported number was measured on, which is how a clamp on avg_days_late silently
+    # left data/ledger.json a version behind its own generator.
+    if LEDGER_PATH.exists():
+        committed = json.loads(LEDGER_PATH.read_text(encoding="utf-8"))
+        assert fingerprint(committed) == fingerprint(a), (
+            f"{LEDGER_PATH.name} ({fingerprint(committed)}) no longer matches seed 42 "
+            f"({fingerprint(a)}); re-run `python -m app.ledger --seed 42 --write` and "
+            "re-derive any number measured on the old file"
+        )
 
     print("ok  ledger self check passed")
 
