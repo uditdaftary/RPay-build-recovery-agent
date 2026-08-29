@@ -118,6 +118,23 @@ def _invoices_by_debtor(ledger: dict) -> dict[str, list[dict]]:
     return grouped
 
 
+def _plain_overdue_tokens(invoices: dict) -> list[str]:
+    """Tokens for invoices that are overdue with nothing received or deducted yet.
+
+    `INVOICES[token]["status"]` alone is not enough: `_load_invoices` maps TDS_UNDERPAID,
+    PAID_OFF_RAIL and PARTIALLY_PAID to "OVERDUE" too, so a status filter can hand a test an
+    invoice that is already reconciled or part-paid instead of the plain overdue one it
+    means to exercise.
+    """
+    return sorted(
+        t
+        for t, i in invoices.items()
+        if i["status"] == "OVERDUE"
+        and i.get("amount_received_paise", 0) == 0
+        and i.get("tds_deducted_paise", 0) == 0
+    )
+
+
 def test_envelope_opt_out() -> None:
     debtor = {
         "debtor_id": "DEB-TEST",
@@ -556,7 +573,7 @@ def test_resolution_endpoints_share_one_state_gate() -> None:
 
     # A real ledger invoice, since the surface is ledger-backed now. Any plain overdue one
     # exercises the shared state gate; a distinct one from the promise test avoids coupling.
-    token = sorted(t for t, i in INVOICES.items() if i["status"] == "OVERDUE")[0]
+    token = _plain_overdue_tokens(INVOICES)[0]
     original = dict(INVOICES[token])
     due = (business_today() + timedelta(days=7)).isoformat()
     try:
@@ -663,7 +680,7 @@ def test_promise_endpoint_answers_instead_of_ignoring() -> None:
 
     # A distinct ledger invoice from the state-gate test, so the two do not share promise
     # windows on the same debtor.
-    token = sorted(t for t, i in INVOICES.items() if i["status"] == "OVERDUE")[1]
+    token = _plain_overdue_tokens(INVOICES)[1]
     original = dict(INVOICES[token])
     today = business_today()
 
