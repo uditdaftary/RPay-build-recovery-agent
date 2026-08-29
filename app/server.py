@@ -16,6 +16,7 @@ closes the tab mid-redirect. Suppression therefore hangs off the webhook alone.
 import json
 import logging
 import os
+import threading
 from datetime import date, timedelta
 
 import razorpay
@@ -186,6 +187,13 @@ def _find_invoice(order_id: str) -> tuple[str, dict] | tuple[None, None]:
     return None, None
 
 
+# Guards the check-then-append below. Starlette runs sync routes in a threadpool even in
+# one process, so two redeliveries of the same webhook can arrive genuinely concurrently;
+# without this, both could read "not yet processed" before either records it, double
+# crediting one payment.
+_SETTLEMENT_LOCK = threading.Lock()
+
+
 def suppress_on_settlement(token: str, invoice: dict, payment_id: str, amount_paise: int) -> None:
     """Apply a capture to an invoice: halt the ladder if it clears, else chase the remainder.
 
@@ -198,44 +206,45 @@ def suppress_on_settlement(token: str, invoice: dict, payment_id: str, amount_pa
     capture that clears the balance halts the ladder — the Razorpay differentiator: the money
     lands on the rail the agent controls, so chasing stops here, not on the next sweep.
     """
-    processed = invoice.setdefault("processed_payment_ids", [])
-    if payment_id in processed or invoice["status"] == "PAID":
-        audit.record(
-            "settlement.duplicate_ignored",
-            invoice_id=invoice["invoice_id"],
-            payment_id=payment_id,
-        )
-        return
-    processed.append(payment_id)
+    with _SETTLEMENT_LOCK:
+        processed = invoice.setdefault("processed_payment_ids", [])
+        if payment_id in processed or invoice["status"] == "PAID":
+            audit.record(
+                "settlement.duplicate_ignored",
+                invoice_id=invoice["invoice_id"],
+                payment_id=payment_id,
+            )
+            return
+        processed.append(payment_id)
 
-    invoice["amount_received_paise"] = invoice.get("amount_received_paise", 0) + amount_paise
-    remaining = _balance_paise(invoice)
+        invoice["amount_received_paise"] = invoice.get("amount_received_paise", 0) + amount_paise
+        remaining = _balance_paise(invoice)
 
-    if remaining > 0:
-        invoice["status"] = str(InvoiceState.PARTIALLY_PAID)
+        if remaining > 0:
+            invoice["status"] = str(InvoiceState.PARTIALLY_PAID)
+            audit.record(
+                "settlement.partial",
+                invoice_id=invoice["invoice_id"],
+                debtor=invoice["debtor"],
+                debtor_id=invoice["debtor_id"],
+                payment_id=payment_id,
+                amount_paise=amount_paise,
+                remaining_paise=remaining,
+                token=token,
+            )
+            return
+
+        invoice["status"] = "PAID"
         audit.record(
-            "settlement.partial",
+            "settlement.confirmed",
             invoice_id=invoice["invoice_id"],
             debtor=invoice["debtor"],
             debtor_id=invoice["debtor_id"],
             payment_id=payment_id,
             amount_paise=amount_paise,
-            remaining_paise=remaining,
+            suppressed=["queued_followups", "open_promise", "escalation_ladder"],
             token=token,
         )
-        return
-
-    invoice["status"] = "PAID"
-    audit.record(
-        "settlement.confirmed",
-        invoice_id=invoice["invoice_id"],
-        debtor=invoice["debtor"],
-        debtor_id=invoice["debtor_id"],
-        payment_id=payment_id,
-        amount_paise=amount_paise,
-        suppressed=["queued_followups", "open_promise", "escalation_ladder"],
-        token=token,
-    )
 
 
 @app.get("/health")
