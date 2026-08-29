@@ -202,6 +202,30 @@ class Invoice:
         return self.amount_paise - self.amount_received_paise
 
 
+def invoice_outstanding_paise(invoice: dict) -> int:
+    """Naive outstanding for a raw invoice dict (loaded from data/ledger.json).
+
+    Mirrors `Invoice.outstanding_paise` for callers holding a plain dict rather than an
+    `Invoice` instance. One formula, so a fix to the rounding or the field name only has
+    one place to land.
+    """
+    return invoice["amount_paise"] - invoice.get("amount_received_paise", 0)
+
+
+def invoice_collectible_paise(invoice: dict) -> int:
+    """What is actually still owed on one invoice, net of TDS credit and off-rail settlement.
+
+    Same three-term subtraction `app/envelope.py` sums per debtor and `app/statute.py` needs
+    per invoice — named once here rather than re-derived at each call site.
+    """
+    return invoice_outstanding_paise(invoice) - invoice.get("tds_deducted_paise", 0)
+
+
+def format_inr(paise: int) -> str:
+    """Render paise as a whole-rupee string: `Rs 12,34,567`. Truncates sub-rupee change."""
+    return f"Rs {paise // 100:,}"
+
+
 DEBTOR_NAMES = [
     "Acme Industries Pvt Ltd", "Vertex Distributors", "Sundaram Auto Components",
     "Kaveri Textiles Pvt Ltd", "Meridian Logistics", "Prakash Engineering Works",
@@ -426,7 +450,7 @@ def summarise(ledger: dict) -> str:
     for inv in invoices:
         by_state[inv["state"]] = by_state.get(inv["state"], 0) + 1
 
-    total = sum(i["amount_paise"] - i["amount_received_paise"] for i in invoices)
+    total = sum(invoice_outstanding_paise(i) for i in invoices)
     multi = sum(
         1
         for d in debtors
@@ -436,7 +460,7 @@ def summarise(ledger: dict) -> str:
     lines = [
         f"seed {ledger['seed']}  fingerprint {fingerprint(ledger)}  as of {ledger['as_of']}",
         f"{len(merchants)} merchants, {len(debtors)} debtors, {len(invoices)} invoices",
-        f"outstanding: Rs {total // 100:,}",
+        f"outstanding: {format_inr(total)}",
         f"debtors with more than one open invoice: {multi}  (grouping matters)",
         "",
         "invoice states:",
