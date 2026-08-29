@@ -16,8 +16,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from app.baseline import run_baseline_batch
+from app.baseline import BaselineDecision, run_baseline_batch
+from app.envelope import Channel, Language, Strategy, Tone
 from app.ledger import generate
+from app.strategist import StrategistDecision
 
 
 class TestExperimentRunner(unittest.TestCase):
@@ -64,6 +66,73 @@ class TestExperimentRunner(unittest.TestCase):
         self.assertIn("agent_touches_per_lakh", comp)
         self.assertIn("baseline_touches_per_lakh", comp)
         self.assertLess(comp["agent_touches_per_lakh"], comp["baseline_touches_per_lakh"])
+        # The displayed percentage must divide by the same count that is displayed with it.
+        self.assertEqual(comp["total_evaluated_debtors"], len(agent_decisions))
+        self.assertEqual(comp["baseline_wait_restraint_pct"], 0.0)
+
+    def test_restraint_percentage_denominator_matches_evaluated_debtors(self) -> None:
+        """total_evaluated_debtors must equal len(agent_decisions), not len(ledger['debtors']).
+
+        Seed 3 has a debtor with no open invoices, so the two counts diverge (19 vs 20) --
+        reproducing the mismatch a fixed seed-42 test cannot catch.
+        """
+        from run_experiment import (
+            calculate_comparative_metrics,
+            run_deterministic_agent_batch,
+        )
+
+        ledger = generate(seed=3)
+        agent_decisions = run_deterministic_agent_batch(ledger)
+        baseline_decisions = run_baseline_batch(ledger)
+        self.assertLess(len(agent_decisions), len(ledger["debtors"]))
+
+        comp = calculate_comparative_metrics(agent_decisions, baseline_decisions, ledger)
+        self.assertEqual(comp["total_evaluated_debtors"], len(agent_decisions))
+
+    def test_prevented_escalations_pairs_by_debtor_id_not_position(self) -> None:
+        """A positional zip would misattribute decisions when the two lists' orders differ."""
+        from run_experiment import calculate_comparative_metrics
+
+        def agent(debtor_id: str, strategy: Strategy) -> StrategistDecision:
+            return StrategistDecision(
+                debtor_id=debtor_id,
+                debtor_name=debtor_id,
+                strategy=strategy,
+                channel=Channel.NONE,
+                language=Language.EN,
+                tone=Tone.NEUTRAL,
+                reasoning="test",
+                confidence=1.0,
+            )
+
+        def baseline(debtor_id: str, strategy: Strategy) -> BaselineDecision:
+            return BaselineDecision(
+                debtor_id=debtor_id,
+                debtor_name=debtor_id,
+                strategy=strategy,
+                channel="email",
+                tone="firm",
+                ask_amount_paise=0,
+                days_overdue=40,
+                reasoning="test",
+            )
+
+        agent_decisions = [
+            agent("DEB-1", Strategy.ESCALATE),
+            agent("DEB-2", Strategy.WAIT),
+        ]
+        # Deliberately reversed relative to agent_decisions.
+        baseline_decisions = [
+            baseline("DEB-2", Strategy.ESCALATE),
+            baseline("DEB-1", Strategy.REQUEST_PAYMENT),
+        ]
+
+        comp = calculate_comparative_metrics(agent_decisions, baseline_decisions, self.ledger)
+        # Correct (id-paired): DEB-1 agent=ESCALATE (not prevented), DEB-2 baseline=ESCALATE
+        # and agent=WAIT (prevented) -> 1. A positional zip pairs DEB-1-agent with
+        # DEB-2-baseline and DEB-2-agent with DEB-1-baseline, both of which look
+        # "not prevented" by coincidence of this data, giving 0.
+        self.assertEqual(comp["prevented_escalations_count"], 1)
 
     def test_curated_hard_case_adjudication_matrix(self) -> None:
         """Verify 8 hard-case adjudication matrix covering all debtor archetypes."""
