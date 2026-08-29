@@ -552,14 +552,16 @@ def test_resolution_endpoints_share_one_state_gate() -> None:
     """A dispute closes the payment and promise doors, and money asks are bounded."""
     from fastapi.testclient import TestClient
 
-    from app.server import DEMO_INVOICES, app
+    from app.server import INVOICES, app
 
-    token = "tok_demo2"
-    original = dict(DEMO_INVOICES[token])
+    # A real ledger invoice, since the surface is ledger-backed now. Any plain overdue one
+    # exercises the shared state gate; a distinct one from the promise test avoids coupling.
+    token = sorted(t for t, i in INVOICES.items() if i["status"] == "OVERDUE")[0]
+    original = dict(INVOICES[token])
     due = (business_today() + timedelta(days=7)).isoformat()
     try:
         with TestClient(app) as client:
-            invoice_paise = DEMO_INVOICES[token]["amount_paise"]
+            invoice_paise = INVOICES[token]["amount_paise"]
             # 0 is an answer, not a silence: refused, never read as "the whole invoice".
             zero = client.post("/api/create-order", json={"token": token, "amount_paise": 0})
             assert zero.status_code == 422, f"an amount of zero was accepted ({zero.text})"
@@ -581,12 +583,12 @@ def test_resolution_endpoints_share_one_state_gate() -> None:
             # A promise used to rewrite the status to PROMISED and reopen the payment path.
             promised = client.post("/api/promise", json={"token": token, "promised_date": due})
             assert promised.status_code == 400, "a promise was accepted on a disputed invoice"
-            assert DEMO_INVOICES[token]["status"] == "DISPUTED", "the dispute was cleared"
+            assert INVOICES[token]["status"] == "DISPUTED", "the dispute was cleared"
             assert client.post("/api/create-order", json={"token": token}).status_code == 400, (
                 "payment was reopened on a disputed invoice"
             )
     finally:
-        DEMO_INVOICES[token] = original
+        INVOICES[token] = original
     print("ok  the resolution endpoints agree on what state accepts a write")
 
 
@@ -657,10 +659,12 @@ def test_promise_endpoint_answers_instead_of_ignoring() -> None:
     """
     from fastapi.testclient import TestClient
 
-    from app.server import DEMO_INVOICES, app
+    from app.server import INVOICES, app
 
-    token = "tok_demo1"
-    original = dict(DEMO_INVOICES[token])
+    # A distinct ledger invoice from the state-gate test, so the two do not share promise
+    # windows on the same debtor.
+    token = sorted(t for t, i in INVOICES.items() if i["status"] == "OVERDUE")[1]
+    original = dict(INVOICES[token])
     today = business_today()
 
     def promise(days: int):
@@ -678,22 +682,22 @@ def test_promise_endpoint_answers_instead_of_ignoring() -> None:
             assert "earlier" in pushed.json()["error"], pushed.json()
 
             assert promise(3).status_code == 200, "a debtor offering to pay sooner was refused"
-            assert DEMO_INVOICES[token]["promise_windows"] == 1, (
+            assert INVOICES[token]["promise_windows"] == 1, (
                 "bringing a date forward spent a suppression window"
             )
 
             # Let the date pass without paying, twice, and the budget runs out.
-            DEMO_INVOICES[token]["promised_date"] = (today - timedelta(days=1)).isoformat()
+            INVOICES[token]["promised_date"] = (today - timedelta(days=1)).isoformat()
             assert promise(10).status_code == 200, "a second window was refused"
 
-            DEMO_INVOICES[token]["promised_date"] = (today - timedelta(days=1)).isoformat()
+            INVOICES[token]["promised_date"] = (today - timedelta(days=1)).isoformat()
             spent = promise(10)
             assert spent.status_code == 400, (
                 "recovery could be suppressed for another window with no payment"
             )
             assert "person" in spent.json()["error"], spent.json()
     finally:
-        DEMO_INVOICES[token] = original
+        INVOICES[token] = original
     print("ok  the promise endpoint refuses what the fold would ignore")
 
 
