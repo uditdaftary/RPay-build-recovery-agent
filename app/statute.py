@@ -33,6 +33,7 @@ from app.ledger import (
     STATUTORY_WINDOW_DEFAULT_DAYS,
     STATUTORY_WINDOW_WRITTEN_DAYS,
     Merchant,
+    invoice_collectible_paise,
     msmed_eligible,
 )
 
@@ -225,6 +226,16 @@ def evaluate_section_43b_h(
         return Section43BHEvaluation(
             is_eligible=False,
             refusal_reason=eligibility_reason,
+        )
+
+    # A disallowance risk requires a live balance. `invoice` used to be accepted and never
+    # read, so this returned the same "at risk" notice for an invoice already settled by
+    # TDS credit, off-rail payment, or full receipt — the exact false-threat failure the
+    # anti-dark-pattern guardrails in this module exist to prevent.
+    if invoice_collectible_paise(invoice) <= 0:
+        return Section43BHEvaluation(
+            is_eligible=False,
+            refusal_reason="invoice has no outstanding collectible balance; nothing to disallow",
         )
 
     fy = get_financial_year(as_of)

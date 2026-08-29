@@ -199,6 +199,38 @@ class TestStatuteAndDisputes(unittest.TestCase):
         self.assertFalse(eval_unreg.is_eligible)
         self.assertIn("not registered", eval_unreg.refusal_reason.lower())
 
+    def test_section_43b_h_refuses_a_settled_invoice(self) -> None:
+        """A fully paid invoice is never a disallowance risk, regardless of merchant eligibility."""
+        m_eligible = Merchant("M1", "Eligible Mfg", True, "micro", UdyamActivity.MANUFACTURING)
+        as_of = date(2026, 8, 26)
+
+        paid = {
+            "invoice_id": "INV-201",
+            "amount_paise": 500_000_00,
+            "amount_received_paise": 500_000_00,
+            "state": "PAID",
+        }
+        eval_paid = evaluate_section_43b_h(m_eligible, paid, as_of)
+        self.assertFalse(eval_paid.is_eligible)
+        self.assertIsNone(eval_paid.compliant_notice_copy)
+
+        # TDS withheld and remitted reconciles to face value too; no shortfall to flag.
+        tds_settled = {
+            "invoice_id": "INV-202",
+            "amount_paise": 500_000_00,
+            "amount_received_paise": 450_000_00,
+            "tds_deducted_paise": 50_000_00,
+            "state": "TDS_UNDERPAID",
+        }
+        eval_tds = evaluate_section_43b_h(m_eligible, tds_settled, as_of)
+        self.assertFalse(eval_tds.is_eligible)
+
+        # A genuinely outstanding invoice still gets the notice.
+        outstanding = {**paid, "amount_received_paise": 0, "state": "OVERDUE"}
+        eval_outstanding = evaluate_section_43b_h(m_eligible, outstanding, as_of)
+        self.assertTrue(eval_outstanding.is_eligible)
+        self.assertIsNotNone(eval_outstanding.compliant_notice_copy)
+
     def test_section_43b_h_notice_generation(self) -> None:
         """Generate compliant notice copy for eligible merchants and suppress for ineligible."""
         m_eligible = Merchant("M1", "Eligible Mfg", True, "small", UdyamActivity.MANUFACTURING)
