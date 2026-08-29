@@ -157,6 +157,18 @@ class TestStatuteAndDisputes(unittest.TestCase):
         self.assertGreater(res.total_payable_paise, principal)
         self.assertEqual(res.total_payable_paise, principal + res.accrued_interest_paise)
 
+    def test_section_16_interest_non_exact_rate_does_not_drift(self) -> None:
+        """A non-default RBI rate must not leak binary-float noise into the reported rate.
+
+        6.1 * 3 is 18.299999999999997 in plain float. rbi_bank_rate_pct is a public keyword
+        argument meant to be overridden with the rate in force at the time, so a realistic
+        rate change is exactly the input that must stay clean.
+        """
+        res = calculate_section_16_interest(
+            1_000_000_00, date(2026, 1, 1), date(2026, 4, 1), rbi_bank_rate_pct=6.1
+        )
+        self.assertEqual(res.annual_rate_pct, 18.3)
+
     def test_section_43b_h_financial_year(self) -> None:
         """Verify Indian Financial Year (April 1 - March 31) computation."""
         self.assertEqual(get_financial_year(date(2026, 4, 1)), "2026-27")

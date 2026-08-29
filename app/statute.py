@@ -121,7 +121,12 @@ def calculate_section_16_interest(
     All monetary math is performed in exact Decimal and quantized to integer paise.
     """
     days_overdue = (as_of - due_date).days
-    annual_rate_pct = rbi_bank_rate_pct * STATUTORY_RATE_MULTIPLIER
+    # Decimal from the rate's own string form, multiplied by an int, not `rate * multiplier`
+    # in float first: 6.1 * 3 is 18.299999999999997 in binary float, and stringifying that
+    # into Decimal would bake the drift into every downstream figure this function reports,
+    # despite the module's own claim of "zero floating-point drift".
+    annual_rate_dec = Decimal(str(rbi_bank_rate_pct)) * STATUTORY_RATE_MULTIPLIER
+    annual_rate_pct = float(annual_rate_dec)
 
     if days_overdue <= 0 or principal_paise <= 0:
         return StatutoryInterestResult(
@@ -142,7 +147,7 @@ def calculate_section_16_interest(
     residual_days = days_overdue % rest_interval_days
 
     p_dec = Decimal(principal_paise)
-    r_annual_dec = Decimal(str(annual_rate_pct)) / Decimal("100")
+    r_annual_dec = annual_rate_dec / Decimal("100")
     monthly_rate_dec = r_annual_dec / Decimal("12")
 
     # A_M = P * (1 + r/12)^M
