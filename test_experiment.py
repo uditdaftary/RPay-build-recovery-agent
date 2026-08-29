@@ -18,7 +18,7 @@ from pathlib import Path
 
 from app.baseline import BaselineDecision, run_baseline_batch
 from app.envelope import Channel, Language, Strategy, Tone
-from app.ledger import generate
+from app.ledger import generate, invoice_collectible_paise
 from app.strategist import StrategistDecision
 
 
@@ -50,7 +50,8 @@ class TestExperimentRunner(unittest.TestCase):
         agent_decisions = run_deterministic_agent_batch(self.ledger)
         baseline_decisions = run_baseline_batch(self.ledger)
 
-        comp = calculate_comparative_metrics(agent_decisions, baseline_decisions, self.ledger)
+        total_collectible = sum(invoice_collectible_paise(i) for i in self.ledger["invoices"])
+        comp = calculate_comparative_metrics(agent_decisions, baseline_decisions, total_collectible)
         self.assertIn("agent_distribution", comp)
         self.assertIn("baseline_distribution", comp)
         # Baseline always has 0% WAIT restraint on overdue debtors
@@ -86,7 +87,8 @@ class TestExperimentRunner(unittest.TestCase):
         baseline_decisions = run_baseline_batch(ledger)
         self.assertLess(len(agent_decisions), len(ledger["debtors"]))
 
-        comp = calculate_comparative_metrics(agent_decisions, baseline_decisions, ledger)
+        total_collectible = sum(invoice_collectible_paise(i) for i in ledger["invoices"])
+        comp = calculate_comparative_metrics(agent_decisions, baseline_decisions, total_collectible)
         self.assertEqual(comp["total_evaluated_debtors"], len(agent_decisions))
 
     def test_prevented_escalations_pairs_by_debtor_id_not_position(self) -> None:
@@ -127,7 +129,7 @@ class TestExperimentRunner(unittest.TestCase):
             baseline("DEB-1", Strategy.REQUEST_PAYMENT),
         ]
 
-        comp = calculate_comparative_metrics(agent_decisions, baseline_decisions, self.ledger)
+        comp = calculate_comparative_metrics(agent_decisions, baseline_decisions, 0)
         # Correct (id-paired): DEB-1 agent=ESCALATE (not prevented), DEB-2 baseline=ESCALATE
         # and agent=WAIT (prevented) -> 1. A positional zip pairs DEB-1-agent with
         # DEB-2-baseline and DEB-2-agent with DEB-1-baseline, both of which look

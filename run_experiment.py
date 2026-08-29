@@ -25,7 +25,13 @@ from typing import Any
 from app import audit, llm
 from app.baseline import BaselineDecision, run_baseline_batch
 from app.envelope import Channel, Strategy
-from app.ledger import AS_OF, generate
+from app.ledger import (
+    AS_OF,
+    format_inr,
+    generate,
+    invoice_collectible_paise,
+    invoice_outstanding_paise,
+)
 from app.strategist import StrategistDecision, run_strategist_batch
 
 logger = logging.getLogger(__name__)
@@ -54,15 +60,15 @@ class PortfolioMetrics:
 
     @property
     def book_value_inr(self) -> str:
-        return f"Rs {self.total_book_value_paise // 100:,}"
+        return format_inr(self.total_book_value_paise)
 
     @property
     def naive_outstanding_inr(self) -> str:
-        return f"Rs {self.total_naive_outstanding_paise // 100:,}"
+        return format_inr(self.total_naive_outstanding_paise)
 
     @property
     def collectible_inr(self) -> str:
-        return f"Rs {self.total_collectible_paise // 100:,}"
+        return format_inr(self.total_collectible_paise)
 
 
 @dataclass
@@ -83,11 +89,8 @@ def calculate_portfolio_metrics(ledger: dict[str, Any]) -> PortfolioMetrics:
     debtors = ledger["debtors"]
 
     total_book_value = sum(i["amount_paise"] for i in invoices)
-    total_naive = sum(i["amount_paise"] - i.get("amount_received_paise", 0) for i in invoices)
-    total_collectible = sum(
-        i["amount_paise"] - i.get("amount_received_paise", 0) - i.get("tds_deducted_paise", 0)
-        for i in invoices
-    )
+    total_naive = sum(invoice_outstanding_paise(i) for i in invoices)
+    total_collectible = sum(invoice_collectible_paise(i) for i in invoices)
 
     return PortfolioMetrics(
         total_book_value_paise=total_book_value,
@@ -380,7 +383,7 @@ def run_deterministic_agent_batch(ledger: dict[str, Any]) -> list[StrategistDeci
 def calculate_comparative_metrics(
     agent_decisions: list[StrategistDecision],
     baseline_decisions: list[BaselineDecision],
-    ledger: dict[str, Any],
+    total_collectible_paise: int,
 ) -> dict[str, Any]:
     """Compute comparative statistics between Agent and Baseline policies."""
     agent_dist: dict[str, int] = {}
@@ -421,12 +424,9 @@ def calculate_comparative_metrics(
         and a.strategy != Strategy.ESCALATE
     )
 
-    # Touch Efficiency (Touches per Rs 1 Lakh collected)
-    invoices = ledger["invoices"]
-    total_collectible_paise = sum(
-        i["amount_paise"] - i.get("amount_received_paise", 0) - i.get("tds_deducted_paise", 0)
-        for i in invoices
-    )
+    # Touch Efficiency (Touches per Rs 1 Lakh collected). total_collectible_paise is the
+    # figure calculate_portfolio_metrics already summed over the same invoices; passed in
+    # rather than re-derived, so the two callers of this run cannot silently disagree.
     collectible_lakhs = total_collectible_paise / (100_000 * 100)
 
     agent_touches = sum(1 for d in agent_decisions if d.channel != Channel.NONE)
@@ -567,9 +567,9 @@ def build_adjudication_matrix(
             "debtor_id": d_id,
             "debtor_name": d_name,
             "baseline_strategy": b_dec.strategy.value if b_dec else "N/A",
-            "baseline_action": f"{b_dec.strategy.value} ({b_dec.channel}, Rs {b_dec.ask_amount_paise // 100:,})" if b_dec else "N/A",
+            "baseline_action": f"{b_dec.strategy.value} ({b_dec.channel}, {format_inr(b_dec.ask_amount_paise)})" if b_dec else "N/A",
             "agent_strategy": a_dec.strategy.value if a_dec else "N/A",
-            "agent_action": f"{a_dec.strategy.value} ({a_dec.channel.value}, Rs {a_dec.ask_amount_paise // 100:,})" if a_dec and a_dec.ask_amount_paise is not None else (f"{a_dec.strategy.value} ({a_dec.channel.value})" if a_dec else "N/A"),
+            "agent_action": f"{a_dec.strategy.value} ({a_dec.channel.value}, {format_inr(a_dec.ask_amount_paise)})" if a_dec and a_dec.ask_amount_paise is not None else (f"{a_dec.strategy.value} ({a_dec.channel.value})" if a_dec else "N/A"),
             "verdict": verdict,
             "rationale": rationale,
         })
@@ -716,7 +716,9 @@ def run_experiment(
 
         baseline_decisions = run_baseline_batch(ledger)
 
-        comparative_metrics = calculate_comparative_metrics(agent_decisions, baseline_decisions, ledger)
+        comparative_metrics = calculate_comparative_metrics(
+            agent_decisions, baseline_decisions, portfolio.total_collectible_paise
+        )
         adjudication_matrix = build_adjudication_matrix(agent_decisions, baseline_decisions, ledger)
 
         return ExperimentResult(
