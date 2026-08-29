@@ -37,7 +37,7 @@ from app.envelope import (
     Tone,
     evaluate_envelope,
 )
-from app.ledger import AS_OF, agent_view
+from app.ledger import AS_OF, InvoiceState, agent_view
 from app.ledger import balance_paise as _balance_paise
 
 
@@ -92,18 +92,41 @@ def _format_inr(paise: int) -> str:
     return f"Rs {rupees:,}"
 
 
-def _resolution_url(invoices: list[dict[str, Any]]) -> str | None:
+def _oldest(invoices: list[dict[str, Any]]) -> dict[str, Any] | None:
+    return max(invoices, key=lambda inv: inv.get("days_overdue", 0), default=None)
+
+
+def _resolution_url(invoices: list[dict[str, Any]], strategy: Strategy) -> str | None:
     """The resolution link for the invoice a contact decision is really about.
 
-    The oldest invoice with something still collectible: it is the one nearest the s.15
-    statutory clock and the one worth putting in front of the debtor first. The token is the
-    invoice id, so `/r/{invoice_id}` needs no separate token table. Nothing collectible means
-    nothing to pay, so no link.
+    A RESOLVE_DISPUTE or RECONCILE decision is about a specific invoice state, not "whatever
+    is oldest" — linking a dispute email to some other, undisputed invoice sends the debtor
+    to a page with no dispute context at all. So the invoice the message concerns takes
+    priority when the strategy names one; otherwise this falls back to the oldest invoice
+    with something still collectible, which is the one nearest the s.15 statutory clock and
+    the one worth putting in front of the debtor first. The token is the invoice id, so
+    `/r/{invoice_id}` needs no separate token table. Nothing to point at means no link.
     """
+    if strategy == Strategy.RESOLVE_DISPUTE:
+        disputed = [inv for inv in invoices if inv.get("state") == InvoiceState.DISPUTED]
+        primary = _oldest(disputed)
+        if primary is not None:
+            return f"{PUBLIC_BASE_URL}/r/{primary['invoice_id']}"
+
+    if strategy == Strategy.RECONCILE:
+        reconcilable = [
+            inv
+            for inv in invoices
+            if inv.get("state") in (InvoiceState.TDS_UNDERPAID, InvoiceState.PAID_OFF_RAIL)
+        ]
+        primary = _oldest(reconcilable)
+        if primary is not None:
+            return f"{PUBLIC_BASE_URL}/r/{primary['invoice_id']}"
+
     collectible = [inv for inv in invoices if _balance_paise(inv) > 0]
-    if not collectible:
+    primary = _oldest(collectible)
+    if primary is None:
         return None
-    primary = max(collectible, key=lambda inv: inv.get("days_overdue", 0))
     return f"{PUBLIC_BASE_URL}/r/{primary['invoice_id']}"
 
 
@@ -519,7 +542,7 @@ Return your structured decision according to the schema. Ensure strategy is one 
     # by now been forced to a no-contact fallback, so this reads the settled channel, not the
     # one the model asked for.
     if decision.channel != Channel.NONE:
-        decision.resolution_url = _resolution_url(invoices)
+        decision.resolution_url = _resolution_url(invoices, decision.strategy)
 
     _record_decision(decision)
 
