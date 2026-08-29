@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import tempfile
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
@@ -136,8 +137,31 @@ def _extract_json_section(prompt: str, header: str) -> Any:
     return None
 
 
+def _promises_kept_ratio(debtor_profile: dict) -> tuple[int, int]:
+    """Parse the "5 of 6" promises_kept string in debtor_profile into (kept, made)."""
+    match = re.match(r"(\d+)\s+of\s+(\d+)", str(debtor_profile.get("promises_kept", "")))
+    return (int(match.group(1)), int(match.group(2))) if match else (0, 0)
+
+
+def _envelope_excludes_for(envelope: dict, strategy: str, keyword: str) -> bool:
+    """Whether the real envelope's own exclusion reason for `strategy` mentions `keyword`.
+
+    Reuses the envelope's already-computed policy signal (e.g. VIP relationship protection
+    excluding ESCALATE) instead of re-deriving a parallel threshold in the mock.
+    """
+    reason = envelope.get("excluded_strategies", {}).get(strategy, "")
+    return keyword in reason.lower()
+
+
 def _deterministic_mock_llm(prompt: str, **kwargs: Any) -> str:
-    """Deterministic offline solver that mirrors the AI Strategist's reasoning."""
+    """Deterministic offline solver that mirrors the AI Strategist's reasoning.
+
+    Every branch below reasons from the debtor/invoice/envelope signals already present in
+    the prompt -- the same ones the real system prompt asks the model to weigh -- rather
+    than a hardcoded list of debtor IDs known to fit an archetype at one particular seed.
+    A branch keyed on "DEB-006" is only "reliable late payer" by accident of that seed's
+    RNG draw; at another seed the same ID is an arbitrary debtor.
+    """
     debtor_profile = _extract_json_section(prompt, "DEBTOR PROFILE:") or {}
     invoices = _extract_json_section(prompt, "OPEN INVOICES (") or []
     merchant = _extract_json_section(prompt, "MERCHANT / SUPPLIER:") or {}
@@ -149,7 +173,6 @@ def _deterministic_mock_llm(prompt: str, **kwargs: Any) -> str:
     max_ask = envelope.get("max_ask_paise", collectible_paise)
     ask_paise = max(min_ask, min(collectible_paise, max_ask))
 
-    debtor_id = debtor_profile.get("debtor_id", "")
     debtor_name = debtor_profile.get("name", "")
 
     # 1. Active Dispute
@@ -185,18 +208,12 @@ def _deterministic_mock_llm(prompt: str, **kwargs: Any) -> str:
                 "review_required": True
             })
 
-    # 2. TDS Underpaid or Paid Off-Rail
+    # 2. TDS Underpaid or Paid Off-Rail. Always reconcile the discrepancy first when one
+    # exists on the account -- what is genuinely still owed cannot be known until it is
+    # reconciled, whatever else on the account looks collectible in the meantime.
     has_tds = any(i.get("state") == "TDS_UNDERPAID" for i in invoices)
     has_off_rail = any(i.get("state") == "PAID_OFF_RAIL" for i in invoices)
-    if (
-        (has_tds or has_off_rail)
-        and "RECONCILE" in permitted
-        and (
-            collectible_paise == 0
-            or "REQUEST_PAYMENT" not in permitted
-            or debtor_id in ("DEB-001", "DEB-004", "DEB-005", "DEB-009", "DEB-010", "DEB-012", "DEB-015", "DEB-019")
-        )
-    ):
+    if (has_tds or has_off_rail) and "RECONCILE" in permitted:
         reason = (
             "Buyer legitimately deducted TDS and remitted balance. Requesting Form 26AS certificate rather than demanding shortfall."
             if has_tds
@@ -217,8 +234,13 @@ def _deterministic_mock_llm(prompt: str, **kwargs: Any) -> str:
             "review_required": False
         })
 
-    # 3. Reliable Late Payer (WAIT restraint)
-    if "WAIT" in permitted and debtor_id in ("DEB-006", "DEB-013", "DEB-017"):
+    # 3. Reliable Late Payer (WAIT restraint). Same threshold as
+    # test_decisions.py::live_wait_restraint_check: pays late often enough to have a
+    # track record, but keeps at least 4 of 5 promises.
+    kept, made = _promises_kept_ratio(debtor_profile)
+    avg_days_late = debtor_profile.get("avg_days_late", 0) or 0
+    is_reliable_late_payer = made >= 4 and avg_days_late > 0 and (kept / made) >= 0.8
+    if "WAIT" in permitted and is_reliable_late_payer:
         return json.dumps({
             "strategy": "WAIT",
             "channel": "none",
@@ -249,8 +271,11 @@ def _deterministic_mock_llm(prompt: str, **kwargs: Any) -> str:
             "review_required": False
         })
 
-    # 5. VIP Account (<5% Exposure)
-    if debtor_id in ("DEB-003", "DEB-007") and "REQUEST_PAYMENT" in permitted:
+    # 5. VIP Account (<5% Exposure). The real envelope already ran this exact exposure-ratio
+    # check (app/envelope.py rule 6) and, when it applies, excludes ESCALATE with a reason
+    # naming relationship protection -- reuse that signal rather than re-deriving the ratio.
+    is_low_exposure_vip = _envelope_excludes_for(envelope, "ESCALATE", "preserve relationship")
+    if is_low_exposure_vip and "REQUEST_PAYMENT" in permitted:
         return json.dumps({
             "strategy": "REQUEST_PAYMENT",
             "channel": "email",
@@ -265,8 +290,11 @@ def _deterministic_mock_llm(prompt: str, **kwargs: Any) -> str:
             "review_required": False
         })
 
-    # 6. Complex Edge / Human Handoff Fallback
-    if debtor_id in ("DEB-011", "DEB-016") and "HUMAN_HANDOFF" in permitted:
+    # 6. Complex Edge / Human Handoff Fallback: several open invoices in more than one
+    # distinct state, genuinely ambiguous rather than a straightforward single-state account.
+    distinct_states = {i.get("state") for i in invoices}
+    is_complex_mixed_account = len(invoices) >= 3 and len(distinct_states) >= 2
+    if is_complex_mixed_account and "HUMAN_HANDOFF" in permitted:
         return json.dumps({
             "strategy": "HUMAN_HANDOFF",
             "channel": "none",
