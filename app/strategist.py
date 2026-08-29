@@ -579,10 +579,20 @@ def run_strategist_batch(
     events = audit.read_all() if live_state else None
     histories = contact_history.build(fold_date, events)
 
+    # Projected once for the whole ledger, not once per debtor: live_invoice_state rescans
+    # the full events list on every call, so calling it inside the debtor loop turned an
+    # O(events) fold into O(debtors x events) on every live-state batch.
+    live_invoices_by_id: dict[str, dict] | None = None
+    if live_state:
+        live_invoices_by_id = {
+            inv["invoice_id"]: inv
+            for inv in contact_history.live_invoice_state(ledger["invoices"], events, fold_date)
+        }
+
     for debtor in debtors:
         d_invoices = invoices_by_debtor.get(debtor["debtor_id"], [])
-        if live_state and d_invoices:
-            d_invoices = contact_history.live_invoice_state(d_invoices, events, fold_date)
+        if live_invoices_by_id is not None and d_invoices:
+            d_invoices = [live_invoices_by_id[inv["invoice_id"]] for inv in d_invoices]
         if d_invoices:
             # Fail loud, but only where the merchant actually matters. Defaulting to the
             # first merchant would silently hand the debtor whichever statutory eligibility
