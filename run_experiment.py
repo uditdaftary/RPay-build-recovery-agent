@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import tempfile
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
@@ -25,6 +26,8 @@ from app.baseline import BaselineDecision, run_baseline_batch
 from app.envelope import Channel, Strategy
 from app.ledger import AS_OF, generate
 from app.strategist import StrategistDecision, run_strategist_batch
+
+logger = logging.getLogger(__name__)
 
 
 @contextmanager
@@ -95,6 +98,13 @@ def calculate_portfolio_metrics(ledger: dict[str, Any]) -> PortfolioMetrics:
 
 
 def _extract_json_section(prompt: str, header: str) -> Any:
+    """Pull the JSON object or array immediately following `header` out of a prompt string.
+
+    Deliberately soft-fails to None on any parse trouble: a missing or reshaped section
+    must not crash the mock solver mid-batch. But soft-failing silently would let a prompt
+    template change (a header string edited in app/strategist.py, say) go unnoticed while
+    every downstream decision quietly degrades — so every fallback path is logged here.
+    """
     try:
         idx = prompt.index(header)
         start_brace = prompt.find("{", idx)
@@ -120,7 +130,9 @@ def _extract_json_section(prompt: str, header: str) -> Any:
                     if depth == 0:
                         return json.loads(prompt[start : i + 1])
     except Exception:
-        pass
+        logger.warning("could not parse JSON section for header %r", header, exc_info=True)
+        return None
+    logger.warning("header %r found but no balanced JSON section followed it", header)
     return None
 
 
