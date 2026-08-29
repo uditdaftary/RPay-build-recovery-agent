@@ -159,6 +159,31 @@ class TestExperimentRunner(unittest.TestCase):
         self.assertTrue(any("reliable" in name or "cooldown" in name for name in case_names), "Reliable Late Payer archetype missing")
         self.assertTrue(any("human" in name or "loss" in name or "review" in name for name in case_names), "Human Review / Loss archetype missing")
 
+        # Every verdict shown must be earned: an authored "Agent Win" claim requires the
+        # agent's strategy to actually differ from baseline's, never a claim about a
+        # strategy the seed's data does not actually show.
+        for item in matrix:
+            if item["verdict"].startswith("N/A"):
+                continue
+            self.assertNotEqual(item["agent_strategy"], item["baseline_strategy"])
+            self.assertNotEqual(item["agent_strategy"], "N/A")
+
+    def test_adjudication_verdict_is_na_when_case_does_not_reproduce(self) -> None:
+        """A debtor missing the case's target invoice state must not show a fabricated win.
+
+        Seed 100 reproduces exactly this: DEB-005 has no open invoices at all, yet the
+        case list still names it for the Off-Rail NEFT archetype.
+        """
+        from run_experiment import build_adjudication_matrix, run_deterministic_agent_batch
+
+        ledger = generate(seed=100)
+        agent_decisions = run_deterministic_agent_batch(ledger)
+        baseline_decisions = run_baseline_batch(ledger)
+        matrix = build_adjudication_matrix(agent_decisions, baseline_decisions, ledger)
+
+        row = next(item for item in matrix if item["debtor_id"] == "DEB-005")
+        self.assertTrue(row["verdict"].startswith("N/A"))
+
     def test_output_formatters(self) -> None:
         """Verify Table, JSON, and Markdown output generation."""
         from run_experiment import (

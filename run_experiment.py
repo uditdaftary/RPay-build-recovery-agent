@@ -539,6 +539,28 @@ def build_adjudication_matrix(
         b_dec = baseline_by_id.get(d_id)
         d_name = a_dec.debtor_name if a_dec else (b_dec.debtor_name if b_dec else d_id)
 
+        # The curated verdict text is authored narrative, true only when this debtor's
+        # ledger row still matches the archetype the case was written to demonstrate --
+        # which is seed-dependent (invoice states are randomised per debtor at generation
+        # time), while the case list itself is not. Show the authored win only when the
+        # target invoice state is actually present AND the agent's strategy actually
+        # differs from the baseline's; otherwise the case does not reproduce at this seed
+        # and the honest thing to print is that, not the authored claim.
+        target_state = c["target_invoice_state"]
+        d_invoices = invoices_by_debtor.get(d_id, [])
+        case_applies = (
+            a_dec is not None
+            and b_dec is not None
+            and any(i.get("state") == target_state for i in d_invoices)
+            and a_dec.strategy != b_dec.strategy
+        )
+        verdict = c["verdict"] if case_applies else "N/A (case does not reproduce at this seed)"
+        rationale = c["rationale"] if case_applies else (
+            f"Debtor {d_id} does not currently exhibit the {target_state} archetype this "
+            "case demonstrates, or the agent's strategy did not diverge from baseline's; "
+            "re-run at a different --seed to see it, or treat this row as inapplicable."
+        )
+
         matrix_rows.append({
             "case_id": c["case_id"],
             "case_name": c["case_name"],
@@ -548,8 +570,8 @@ def build_adjudication_matrix(
             "baseline_action": f"{b_dec.strategy.value} ({b_dec.channel}, Rs {b_dec.ask_amount_paise // 100:,})" if b_dec else "N/A",
             "agent_strategy": a_dec.strategy.value if a_dec else "N/A",
             "agent_action": f"{a_dec.strategy.value} ({a_dec.channel.value}, Rs {a_dec.ask_amount_paise // 100:,})" if a_dec and a_dec.ask_amount_paise is not None else (f"{a_dec.strategy.value} ({a_dec.channel.value})" if a_dec else "N/A"),
-            "verdict": c["verdict"],
-            "rationale": c["rationale"],
+            "verdict": verdict,
+            "rationale": rationale,
         })
 
     return matrix_rows
