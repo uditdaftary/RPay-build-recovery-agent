@@ -233,9 +233,11 @@ def build(
                 event.get("invoice_id"),
             )
 
-        elif name == "settlement.confirmed":
-            # Settlement closes the promise. This is the same suppression the webhook
-            # already performs on the ladder, applied to the envelope's view of it.
+        elif name in SETTLEMENT_EVENTS:
+            # Settlement closes the promise — a partial capture counts too, the same as a
+            # full one: money landing is the thing the promise was for, whether or not it
+            # clears the balance. This is the same suppression the webhook already performs
+            # on the ladder, applied to the envelope's view of it.
             #
             # Only the invoice the promise was made on closes it. Both rows are keyed on
             # the debtor, so paying invoice B used to cancel an open promise running on
