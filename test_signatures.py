@@ -147,6 +147,15 @@ def test_health_endpoint() -> None:
     print("ok  health endpoint sanitisation")
 
 
+def load_tests(loader, tests, pattern):
+    import unittest
+    suite = unittest.TestSuite()
+    for name, func in list(globals().items()):
+        if name.startswith("test_") and callable(func) and not isinstance(func, type):
+            suite.addTest(unittest.FunctionTestCase(func))
+    return suite
+
+
 if __name__ == "__main__":
     test_payment_signature()
     test_webhook_signature()
