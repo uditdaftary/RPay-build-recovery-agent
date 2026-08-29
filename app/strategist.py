@@ -38,6 +38,7 @@ from app.envelope import (
     evaluate_envelope,
 )
 from app.ledger import AS_OF, agent_view
+from app.ledger import balance_paise as _balance_paise
 
 
 class RejectedAction(BaseModel):
@@ -99,14 +100,7 @@ def _resolution_url(invoices: list[dict[str, Any]]) -> str | None:
     invoice id, so `/r/{invoice_id}` needs no separate token table. Nothing collectible means
     nothing to pay, so no link.
     """
-    collectible = [
-        inv
-        for inv in invoices
-        if inv["amount_paise"]
-        - inv.get("amount_received_paise", 0)
-        - inv.get("tds_deducted_paise", 0)
-        > 0
-    ]
+    collectible = [inv for inv in invoices if _balance_paise(inv) > 0]
     if not collectible:
         return None
     primary = max(collectible, key=lambda inv: inv.get("days_overdue", 0))

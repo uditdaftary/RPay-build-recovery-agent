@@ -29,6 +29,7 @@ from app import audit, config, razorpay_gateway
 from app.config import PROJECT_ROOT, business_today
 from app.contact_history import MAX_PROMISE_WINDOWS_WITHOUT_SETTLEMENT
 from app.ledger import InvoiceState
+from app.ledger import balance_paise as _balance_paise
 
 logger = logging.getLogger(__name__)
 
@@ -76,15 +77,6 @@ def _load_invoices() -> dict[str, dict]:
 # Every ledger invoice is resolvable by /r/{invoice_id}, so any decision's link works. The
 # index page shows only a curated few, named in DEMO_TOKENS, to keep the demo landing tight.
 INVOICES: dict[str, dict] = _load_invoices()
-
-
-def _balance_paise(invoice: dict) -> int:
-    """What is still collectible on an invoice: face value less what has landed and TDS."""
-    return (
-        invoice["amount_paise"]
-        - invoice.get("amount_received_paise", 0)
-        - invoice.get("tds_deducted_paise", 0)
-    )
 
 
 def _demo_tokens() -> list[str]:
@@ -217,11 +209,7 @@ def suppress_on_settlement(token: str, invoice: dict, payment_id: str, amount_pa
     processed.append(payment_id)
 
     invoice["amount_received_paise"] = invoice.get("amount_received_paise", 0) + amount_paise
-    remaining = (
-        invoice["amount_paise"]
-        - invoice["amount_received_paise"]
-        - invoice.get("tds_deducted_paise", 0)
-    )
+    remaining = _balance_paise(invoice)
 
     if remaining > 0:
         invoice["status"] = str(InvoiceState.PARTIALLY_PAID)

@@ -26,6 +26,7 @@ from app import audit
 from app.config import BUSINESS_TZ, business_today
 from app.envelope import Channel, DebtorHistory, Strategy
 from app.ledger import InvoiceState
+from app.ledger import balance_paise as _balance_paise
 
 logger = logging.getLogger(__name__)
 
@@ -127,11 +128,7 @@ def live_invoice_state(
             continue
         updated = dict(invoice)
         updated["amount_received_paise"] = invoice.get("amount_received_paise", 0) + credited
-        remaining = (
-            updated["amount_paise"]
-            - updated["amount_received_paise"]
-            - updated.get("tds_deducted_paise", 0)
-        )
+        remaining = _balance_paise(updated)
         updated["state"] = str(
             InvoiceState.PAID if remaining <= 0 else InvoiceState.PARTIALLY_PAID
         )
