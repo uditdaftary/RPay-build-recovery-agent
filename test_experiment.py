@@ -175,6 +175,9 @@ class TestExperimentRunner(unittest.TestCase):
         self.assertIn("PORTFOLIO OVERVIEW", table_out)
         self.assertIn("STRATEGY DISTRIBUTION", table_out)
         self.assertIn("HARD-CASE ADJUDICATION MATRIX", table_out)
+        # The default run is the scripted mock, not the live model; the table report (the
+        # CLI's default output) must say so, not only the markdown report.
+        self.assertIn("Deterministic Evaluator", table_out)
 
         # Markdown formatting
         md_out = format_markdown_output(result)

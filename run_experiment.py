@@ -536,6 +536,8 @@ def format_table_output(result: ExperimentResult) -> str:
     width = 125
     lines.append("=" * width)
     lines.append(f"  B2B RECEIVABLES RECOVERY AGENT -- EVALUATION BENCHMARK (Seed: {result.seed}, As-Of: {result.as_of})")
+    mode = "Live LLM" if result.is_live_llm else "Deterministic Evaluator (scripted mock, not the live model — pass --live-llm for real decisions)"
+    lines.append(f"  Mode: {mode}")
     lines.append("=" * width)
     lines.append("")
     lines.append("1. PORTFOLIO OVERVIEW")
