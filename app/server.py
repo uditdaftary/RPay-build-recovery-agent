@@ -310,6 +310,14 @@ def create_order(body: CreateOrderRequest) -> JSONResponse:
     # settling the remainder of a part-paid invoice is neither overcharged nor able to
     # overpay.
     balance = _balance_paise(invoice)
+    # A TDS_UNDERPAID or PAID_OFF_RAIL invoice reconciles to a live balance of 0 but is not
+    # blocked by _mutation_blocked (its status is "OVERDUE", not "PAID"), so without this a
+    # zero-balance invoice reached the gateway with amount_paise=0 and surfaced Razorpay's
+    # raw "amount_paise must be >= 100" ValueError to the debtor.
+    if balance <= 0:
+        return JSONResponse(
+            {"error": "there is nothing left to collect on this invoice"}, status_code=400
+        )
     amount = balance if body.amount_paise is None else body.amount_paise
     if amount > balance:
         return JSONResponse(
