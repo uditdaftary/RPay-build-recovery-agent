@@ -363,22 +363,34 @@ def calculate_comparative_metrics(
     for d in baseline_decisions:
         baseline_dist[d.strategy.value] = baseline_dist.get(d.strategy.value, 0) + 1
 
+    # Debtors actually evaluated: run_strategist_batch and run_baseline_batch both skip
+    # debtors with no open invoices, so this is not the same count as ledger["debtors"].
+    # The formatters must divide and display against this same number, or the printed
+    # percentage silently stops matching the fraction printed next to it.
     total_debtors = len(agent_decisions)
 
     # Restraint Share: WAIT decisions
     agent_wait_count = agent_dist.get(Strategy.WAIT.value, 0)
     baseline_wait_count = sum(1 for d in baseline_decisions if d.strategy == Strategy.WAIT and d.days_overdue > 0)
     agent_wait_pct = (agent_wait_count / total_debtors * 100) if total_debtors else 0.0
+    baseline_wait_pct = (baseline_wait_count / total_debtors * 100) if total_debtors else 0.0
 
     # Reconciliation Routing
     reconcile_count = agent_dist.get(Strategy.RECONCILE.value, 0)
     reconcile_pct = (reconcile_count / total_debtors * 100) if total_debtors else 0.0
 
-    # Prevented Escalations: Baseline chose ESCALATE, Agent chose collaborative / wait
+    # Prevented Escalations: Baseline chose ESCALATE, Agent chose collaborative / wait.
+    # Paired on debtor_id, not position: run_strategist_batch and run_baseline_batch filter
+    # their debtor lists independently (see test_decisions.py::live_agent_vs_baseline, which
+    # documents the same hazard), so a positional zip would silently misattribute a decision
+    # the moment either filter's output order or membership diverged from the other's.
+    baseline_by_id = {d.debtor_id: d for d in baseline_decisions}
     prevented_escalations = sum(
         1
-        for a, b in zip(agent_decisions, baseline_decisions, strict=True)
-        if b.strategy == Strategy.ESCALATE and a.strategy != Strategy.ESCALATE
+        for a in agent_decisions
+        if (b := baseline_by_id.get(a.debtor_id)) is not None
+        and b.strategy == Strategy.ESCALATE
+        and a.strategy != Strategy.ESCALATE
     )
 
     # Touch Efficiency (Touches per Rs 1 Lakh collected)
@@ -398,9 +410,11 @@ def calculate_comparative_metrics(
     return {
         "agent_distribution": agent_dist,
         "baseline_distribution": baseline_dist,
+        "total_evaluated_debtors": total_debtors,
         "agent_wait_restraint_count": agent_wait_count,
         "agent_wait_restraint_pct": round(agent_wait_pct, 1),
         "baseline_wait_restraint_count": baseline_wait_count,
+        "baseline_wait_restraint_pct": round(baseline_wait_pct, 1),
         "reconcile_routing_count": reconcile_count,
         "reconcile_routing_pct": round(reconcile_pct, 1),
         "prevented_escalations_count": prevented_escalations,
@@ -543,8 +557,9 @@ def format_table_output(result: ExperimentResult) -> str:
         lines.append(f"  {s:<26} {a_cnt:<18} {b_cnt:<18} {a_cnt - b_cnt:+d}")
 
     lines.append("")
-    lines.append(f"  * WAIT Restraint Share    : Agent {m['agent_wait_restraint_pct']}% ({m['agent_wait_restraint_count']}/{p.total_debtors}) vs Baseline 0% (0/{p.total_debtors})")
-    lines.append(f"  * Reconciliation Routing  : Agent {m['reconcile_routing_pct']}% ({m['reconcile_routing_count']}/{p.total_debtors}) accounts directed to Form 26AS / UTR check")
+    n = m["total_evaluated_debtors"]
+    lines.append(f"  * WAIT Restraint Share    : Agent {m['agent_wait_restraint_pct']}% ({m['agent_wait_restraint_count']}/{n}) vs Baseline {m['baseline_wait_restraint_pct']}% ({m['baseline_wait_restraint_count']}/{n})")
+    lines.append(f"  * Reconciliation Routing  : Agent {m['reconcile_routing_pct']}% ({m['reconcile_routing_count']}/{n}) accounts directed to Form 26AS / UTR check")
     lines.append(f"  * Prevented Escalations   : {m['prevented_escalations_count']} accounts spared from premature Day 30+ legal notices")
     lines.append(f"  * Touch Efficiency        : Agent {m['agent_touches_per_lakh']} touches/Lakh vs Baseline {m['baseline_touches_per_lakh']} touches/Lakh")
     lines.append("")
@@ -592,7 +607,7 @@ def format_markdown_output(result: ExperimentResult) -> str:
         "",
         "> [!NOTE]",
         "> **Key Restraint & Quality Insights**:",
-        f"> - **WAIT Restraint Share**: AI Agent achieved **{m['agent_wait_restraint_pct']}%** restraint ({m['agent_wait_restraint_count']}/{p.total_debtors}) vs Baseline 0%.",
+        f"> - **WAIT Restraint Share**: AI Agent achieved **{m['agent_wait_restraint_pct']}%** restraint ({m['agent_wait_restraint_count']}/{m['total_evaluated_debtors']}) vs Baseline **{m['baseline_wait_restraint_pct']}%** ({m['baseline_wait_restraint_count']}/{m['total_evaluated_debtors']}).",
         f"> - **Reconciliation Routing**: **{m['reconcile_routing_count']} accounts** routed to `RECONCILE` for Form 26AS/UTR checks rather than demanding unowed money.",
         f"> - **Prevented Premature Escalations**: **{m['prevented_escalations_count']} debtors** protected from aggressive statutory demand notices.",
         f"> - **Touch Efficiency**: **{m['agent_touches_per_lakh']}** touches per Rs 1 Lakh collected (vs Baseline **{m['baseline_touches_per_lakh']}**).",
