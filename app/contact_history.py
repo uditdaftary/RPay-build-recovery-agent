@@ -103,6 +103,7 @@ def live_invoice_state(
     """
     settled: dict[str, int] = {}
     seen: set[str] = set()
+    unparsable_amounts = 0
     for event in events:
         if event.get("event") not in SETTLEMENT_EVENTS:
             continue
@@ -118,7 +119,22 @@ def live_invoice_state(
             if key in seen:
                 continue
             seen.add(key)
-        settled[invoice_id] = settled.get(invoice_id, 0) + int(event.get("amount_paise", 0))
+        # A present-but-null or non-numeric amount is a defect in whatever wrote the row,
+        # same as an unparsable date or promise amount elsewhere in this file: skipped and
+        # counted, not raised, because one bad row must not take the whole fold down with it.
+        raw_amount = event.get("amount_paise")
+        try:
+            credited_amount = int(raw_amount) if raw_amount is not None else 0
+        except (TypeError, ValueError):
+            unparsable_amounts += 1
+            continue
+        settled[invoice_id] = settled.get(invoice_id, 0) + credited_amount
+
+    if unparsable_amounts:
+        logger.warning(
+            "live invoice state skipped %d settlement event(s) with an unparsable amount_paise",
+            unparsable_amounts,
+        )
 
     projected: list[dict[str, Any]] = []
     for invoice in invoices:
