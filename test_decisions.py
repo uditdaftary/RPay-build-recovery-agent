@@ -1634,6 +1634,11 @@ def load_tests(loader, tests, pattern):
         test_audit_survives_unicode_line_separators,
         test_promises_cannot_hold_recovery_off_forever,
         test_promise_endpoint_answers_instead_of_ignoring,
+        test_live_invoice_state_projects_settlement,
+        test_resolution_surface_is_ledger_backed,
+        test_partial_capture_leaves_the_remainder,
+        test_contact_decision_carries_a_resolution_link,
+        test_run_strategist_batch_live_state_halts_only_when_asked,
         test_baseline_policy,
         test_baseline_ladder_and_its_collapse,
     ]

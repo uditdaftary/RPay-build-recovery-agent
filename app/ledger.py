@@ -202,6 +202,21 @@ class Invoice:
         return self.amount_paise - self.amount_received_paise
 
 
+def balance_paise(invoice: dict) -> int:
+    """What is still collectible on an invoice: face value less what has landed and TDS.
+
+    The one place this arithmetic is written. server.py, contact_history.py and
+    strategist.py each need it on a plain dict (not the Invoice dataclass — the server's
+    in-memory view and the audit-log projection are dicts by construction), so it lives
+    here rather than three times over.
+    """
+    return (
+        invoice["amount_paise"]
+        - invoice.get("amount_received_paise", 0)
+        - invoice.get("tds_deducted_paise", 0)
+    )
+
+
 def invoice_outstanding_paise(invoice: dict) -> int:
     """Naive outstanding for a raw invoice dict (loaded from data/ledger.json).
 
@@ -218,7 +233,7 @@ def invoice_collectible_paise(invoice: dict) -> int:
     Same three-term subtraction `app/envelope.py` sums per debtor and `app/statute.py` needs
     per invoice — named once here rather than re-derived at each call site.
     """
-    return invoice_outstanding_paise(invoice) - invoice.get("tds_deducted_paise", 0)
+    return balance_paise(invoice)
 
 
 def format_inr(paise: int) -> str:
