@@ -29,8 +29,25 @@ from pydantic import BaseModel, Field, field_validator
 from app import audit, config, razorpay_gateway
 from app.config import PROJECT_ROOT, business_today
 from app.contact_history import MAX_PROMISE_WINDOWS_WITHOUT_SETTLEMENT
+from app.disputes import (
+    DisputeCategory,
+    classify_dispute_reason,
+    recompute_statutory_dates_on_dispute,
+)
 from app.ledger import InvoiceState
 from app.ledger import balance_paise as _balance_paise
+
+DISPUTE_EVIDENCE_MAP: dict[DisputeCategory, str] = {
+    DisputeCategory.GOODS_SERVICES: "Inspection Report / Lorry Receipt (LR) Copy / Damage Photos",
+    DisputeCategory.INVOICE_MISMATCH: "Purchase Order (PO) Rate Copy / Pricing Agreement Sheet",
+    DisputeCategory.DUPLICATE: "Original Settled Invoice Reference / Bank Payment Voucher",
+    DisputeCategory.TAX_GST: "GSTR-2B Mismatch Certificate / Form 26AS TDS Credit Entry",
+    DisputeCategory.ALREADY_PAID: "Bank Statement Copy / NEFT-RTGS UTR Transaction Voucher",
+    DisputeCategory.WRONG_RECIPIENT: "GSTIN Certificate / Company Entity Verification Document",
+    DisputeCategory.CONTRACTUAL: "Service Level Agreement (SLA) Clause / Milestone Sign-off Certificate",
+    DisputeCategory.UNKNOWN: "Detailed Written Explanation & Supporting Invoices",
+}
+
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +87,9 @@ def _load_invoices() -> dict[str, dict]:
             "amount_received_paise": inv.get("amount_received_paise", 0),
             "tds_deducted_paise": inv.get("tds_deducted_paise", 0),
             "days_overdue": inv["days_overdue"],
+            "contractual_due_date": inv.get("contractual_due_date"),
+            "delivery_date": inv.get("delivery_date"),
+            "written_agreement": inv.get("written_agreement", True),
             "status": "DISPUTED" if inv["state"] == str(InvoiceState.DISPUTED) else "OVERDUE",
         }
     return view
@@ -552,18 +572,58 @@ def raise_dispute(body: DisputeRequest) -> JSONResponse:
     if blocked is not None:
         return blocked
 
+    category = classify_dispute_reason(body.reason)
+    evidence = DISPUTE_EVIDENCE_MAP.get(category, DISPUTE_EVIDENCE_MAP[DisputeCategory.UNKNOWN])
+
+    # Recompute statutory dates under MSMED Section 15
+    delivery_raw = invoice.get("delivery_date")
+    if delivery_raw:
+        delivery_d = date.fromisoformat(delivery_raw)
+    elif invoice.get("contractual_due_date"):
+        delivery_d = date.fromisoformat(invoice["contractual_due_date"]) - timedelta(days=45)
+    else:
+        delivery_d = business_today() - timedelta(days=invoice.get("days_overdue", 30))
+
+    objection_d = business_today()
+    written = invoice.get("written_agreement", True)
+    acc_d, due_d, app_d = recompute_statutory_dates_on_dispute(
+        delivery_date=delivery_d,
+        written_agreement=written,
+        objection_date=objection_d,
+    )
+    statutory_clock_suspended = acc_d is None
+
     invoice["status"] = "DISPUTED"
     invoice["dispute_reason"] = body.reason
+    invoice["dispute_category"] = category.value
+    invoice["evidence_required"] = evidence
+    invoice["statutory_clock_suspended"] = statutory_clock_suspended
 
-    # Classification and the statutory-clock recalculation land here once the strategist
-    # exists. Halting and routing to a human is correct on its own in the meantime.
     audit.record(
         "dispute.raised",
         invoice_id=invoice["invoice_id"],
         debtor=invoice["debtor"],
         debtor_id=invoice["debtor_id"],
         reason=body.reason,
+        category=category.value,
         escalation="halted",
         routed_to="human_review",
     )
-    return JSONResponse({"ok": True})
+    audit.record(
+        "dispute.statutory_clock_updated",
+        invoice_id=invoice["invoice_id"],
+        debtor_id=invoice["debtor_id"],
+        acceptance_date=acc_d.isoformat() if acc_d else None,
+        statutory_due_date=due_d.isoformat() if due_d else None,
+        statutory_clock_suspended=statutory_clock_suspended,
+    )
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "category": category.value,
+            "evidence_required": evidence,
+            "statutory_clock_suspended": statutory_clock_suspended,
+        }
+    )
+

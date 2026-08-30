@@ -348,6 +348,39 @@ class TestStatuteAndDisputes(unittest.TestCase):
         self.assertEqual(due_late, delivery + timedelta(days=45))
         self.assertEqual(app_late, delivery + timedelta(days=46))
 
+    def test_dispute_endpoint_integration_and_evidence_requirements(self) -> None:
+        from fastapi.testclient import TestClient
+        from app.config import business_today
+        from app.server import INVOICES, app
+
+        client = TestClient(app)
+        test_token = next(iter(INVOICES.keys()))
+
+        # Test objection within 15 days of delivery -> clock suspended
+        INVOICES[test_token]["delivery_date"] = (business_today() - timedelta(days=5)).isoformat()
+        INVOICES[test_token]["status"] = "OVERDUE"
+        payload_recent = {
+            "token": test_token,
+            "reason": "Damaged goods received in batch, 12 units defective short delivery",
+        }
+        res = client.post("/api/dispute", json=payload_recent)
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["category"], "GOODS_SERVICES")
+        self.assertIn("Inspection Report", data["evidence_required"])
+        self.assertTrue(data["statutory_clock_suspended"])
+
+        # Test objection after 15 days of delivery -> deemed acceptance stands
+        INVOICES[test_token]["delivery_date"] = (business_today() - timedelta(days=30)).isoformat()
+        INVOICES[test_token]["status"] = "OVERDUE"
+        res_late = client.post("/api/dispute", json=payload_recent)
+        self.assertEqual(res_late.status_code, 200)
+        data_late = res_late.json()
+        self.assertFalse(data_late["statutory_clock_suspended"])
+
 
 if __name__ == "__main__":
     unittest.main()
+
+

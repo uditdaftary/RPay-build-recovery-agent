@@ -146,8 +146,12 @@
     const reason = document.getElementById("dispute-reason").value.trim();
     if (!reason) { show("dispute-status", "Tell us briefly what is wrong.", false); return; }
     try {
-      await postJSON("/api/dispute", { token: TOKEN, reason });
-      show("dispute-status", "Raised. Automated follow ups on this invoice have stopped.", true);
+      const res = await postJSON("/api/dispute", { token: TOKEN, reason });
+      const statNote = res.statutory_clock_suspended
+        ? " • MSMED Statutory interest clock paused pending resolution."
+        : " • Objection logged past the 15-day deemed acceptance window.";
+      const msg = "Objection Raised [" + res.category + "]" + statNote + "\nRequired Documentation: " + res.evidence_required;
+      show("dispute-status", msg, true);
     } catch (err) {
       show("dispute-status", err.message, false);
     }
