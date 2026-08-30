@@ -887,7 +887,7 @@ def test_run_strategist_batch_live_state_halts_only_when_asked() -> None:
     """`live_state` folds settlement into collectible; without it the batch stays seed-pure.
 
     The default MUST ignore the audit log's settlements, or the Aug 30 uplift number stops
-    being a function of the seed (openitems.md 2). With it on, a settled invoice drops to
+    being a function of the seed (reproducibility constraint). With it on, a settled invoice drops to
     zero collectible, so the money ask the model returned is intercepted and sent for review.
     """
     ledger = {
@@ -1466,7 +1466,7 @@ def test_baseline_ladder_and_its_collapse() -> None:
     rungs = {(d.strategy, d.tone) for d in decisions}
     assert rungs == {(Strategy.ESCALATE, "formal")}, (
         f"baseline no longer collapses to one rung ({rungs}); the divergence commentary in "
-        "the module docstring and the timeline needs re-deriving"
+        "the module docstring and the benchmark needs re-deriving"
     )
     assert not any(d.strategy == Strategy.WAIT for d in decisions)
     print(f"ok  baseline ladder graded per invoice, collapses to {rungs.pop()} per debtor")
@@ -1475,7 +1475,7 @@ def test_baseline_ladder_and_its_collapse() -> None:
 def live_wait_restraint_check() -> None:
     """Opt-in. Does WAIT fire as judgment on debtors who pay late but reliably?
 
-    The video's opening line is that the agent recommends no action on accounts that do not
+    The evaluation checks that the agent recommends no action on accounts that do not
     need chasing. Every WAIT observed so far came from the opt-out fast path, which is
     suppression rather than judgment, so this runs the cohort the claim is actually about.
 
@@ -1530,8 +1530,7 @@ def live_wait_restraint_check() -> None:
     print(f"WAIT as restraint: {restraint} of {len(cohort)}")
     if restraint == 0:
         print(
-            "  NOT EVIDENCED: no debtor in this cohort drew WAIT. The opening line cannot be\n"
-            "  claimed on this run, and the timeline item stays open."
+            "  NOT EVIDENCED: no debtor in this cohort drew WAIT.\n"
         )
 
 
