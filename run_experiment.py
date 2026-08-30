@@ -453,84 +453,116 @@ def calculate_comparative_metrics(
     }
 
 
+# The curated adjudication cases. Each names the debtor that illustrates the archetype at
+# seed 42, the invoice state the archetype needs present, and -- crucially -- the strategy
+# (or set of strategies) the agent must actually choose for the authored verdict to be
+# earned. The debtor->archetype mapping is seed-dependent because invoice states and
+# behaviour draws are randomised per debtor at generation time; the case list is not. So a
+# row's verdict is shown only when all three conditions hold at the running seed.
+#
+# `expected_agent_strategies` is what stops a divergent-but-wrong decision inheriting the
+# verdict: the baseline escalates the entire book by construction, so "agent differs from
+# baseline" is true for nearly every debtor and proves nothing on its own. The agent has to
+# have done the archetype-specific thing (reconcile the TDS, triage the dispute, hold on the
+# reliable payer) -- not merely have picked something other than ESCALATE.
+_DEFAULT_ADJUDICATION_CASES: list[dict[str, Any]] = [
+    {
+        "case_id": 1,
+        "case_name": "TDS Deducted (Form 26AS Reconciliation)",
+        "debtor_id": "DEB-004",
+        "target_invoice_state": "TDS_UNDERPAID",
+        "expected_agent_strategies": {"RECONCILE"},
+        "rationale": "Buyer withheld TDS; Agent reconciles Form 26AS, Baseline accuses of underpayment.",
+        "verdict": "Agent Win (Prevents false underpayment accusation)",
+    },
+    {
+        "case_id": 2,
+        "case_name": "Off-Rail NEFT Payment (UTR Verification)",
+        "debtor_id": "DEB-005",
+        "target_invoice_state": "PAID_OFF_RAIL",
+        "expected_agent_strategies": {"RECONCILE"},
+        "rationale": "UTR submitted; Agent reconciles bank, Baseline demands full payment.",
+        "verdict": "Agent Win (Prevents double-billing good payer)",
+    },
+    {
+        "case_id": 3,
+        "case_name": "Active Dispute (Dispute Triage)",
+        "debtor_id": "DEB-020",
+        "target_invoice_state": "DISPUTED",
+        "expected_agent_strategies": {"RESOLVE_DISPUTE", "HUMAN_HANDOFF"},
+        "rationale": "Disputed within 15 days; Agent routes to dispute resolution, Baseline escalates.",
+        "verdict": "Agent Win (Complies with MSMED s.15 objection rules)",
+    },
+    {
+        "case_id": 4,
+        "case_name": "Trader Ineligible Merchant (MSMED Refusal)",
+        "debtor_id": "DEB-018",
+        "target_invoice_state": "OVERDUE",
+        "expected_agent_strategies": {"REQUEST_PAYMENT", "OBTAIN_PROMISE"},
+        "rationale": "Supplier is a registered trader; Agent chases commercially and declines the statutory notice, Baseline cites Section 15/16 regardless.",
+        "verdict": "Agent Win (Avoids unlawful statutory threats)",
+    },
+    {
+        "case_id": 5,
+        "case_name": "VIP Relationship Protection (<5% Exposure)",
+        "debtor_id": "DEB-012",
+        "target_invoice_state": "TDS_UNDERPAID",
+        # {RECONCILE} rather than "anything but escalate": DEB-012 is one of only two
+        # envelope-VIP debtors at seed 42 and both are diverted before the mock's VIP
+        # branch, so the divergence the row actually shows is the TDS reconcile. A broad
+        # set here would collapse the third gate condition back to "did not escalate".
+        "expected_agent_strategies": {"RECONCILE"},
+        "rationale": "Exposure is under 5% of a Rs 8.4 Cr trailing-12-month account, so the envelope bars escalation; Agent reconciles the TDS component rather than dunning a strategic buyer, Baseline escalates blind to account value.",
+        "verdict": "Agent Win (Protects a high-value account the baseline would escalate)",
+    },
+    {
+        "case_id": 6,
+        "case_name": "Opt-Out Debtor (Permanent Suppression)",
+        "debtor_id": "DEB-008",
+        "target_invoice_state": "OVERDUE",
+        "expected_agent_strategies": {"WAIT"},
+        "rationale": "Debtor requested opt-out; Agent permanently suppresses contact, Baseline continues spam.",
+        "verdict": "Agent Win (Zero harassment compliance)",
+    },
+    {
+        "case_id": 7,
+        "case_name": "Reliable Late Payer (Restraint over Noise)",
+        "debtor_id": "DEB-017",
+        "target_invoice_state": "OVERDUE",
+        "expected_agent_strategies": {"WAIT"},
+        "rationale": "7 of 7 promises kept, ~5 days average late; Agent exercises WAIT restraint, Baseline sends redundant reminders.",
+        "verdict": "Agent Win (Avoids spamming reliable customers)",
+    },
+    {
+        "case_id": 8,
+        "case_name": "Complex Mixed-State Account (Human Handoff)",
+        "debtor_id": "DEB-007",
+        "target_invoice_state": "PARTIALLY_PAID",
+        "expected_agent_strategies": {"HUMAN_HANDOFF"},
+        "rationale": "Several open invoices across more than one lifecycle state with a weak promise record; Agent defers to a human credit specialist, Baseline applies the calendar rung blind to the ambiguity.",
+        "verdict": "Agent defers to human review (baseline escalates regardless)",
+    },
+]
+
+
 def build_adjudication_matrix(
     agent_decisions: list[StrategistDecision],
     baseline_decisions: list[BaselineDecision],
     ledger: dict[str, Any],
+    cases: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Build the curated 8-case adjudication matrix comparing Agent vs Baseline."""
+    """Build the curated 8-case adjudication matrix comparing Agent vs Baseline.
+
+    `cases` defaults to `_DEFAULT_ADJUDICATION_CASES`; it is injectable so a test can feed a
+    deliberately mislabelled case and confirm the verdict gate rejects it.
+    """
+    if cases is None:
+        cases = _DEFAULT_ADJUDICATION_CASES
     agent_by_id = {d.debtor_id: d for d in agent_decisions}
     baseline_by_id = {d.debtor_id: d for d in baseline_decisions}
     invoices_by_debtor: dict[str, list[dict]] = {}
     for inv in ledger["invoices"]:
         invoices_by_debtor.setdefault(inv["debtor_id"], []).append(inv)
-
-    cases: list[dict[str, Any]] = [
-        {
-            "case_id": 1,
-            "case_name": "TDS Deducted (Form 26AS Reconciliation)",
-            "debtor_id": "DEB-004",
-            "target_invoice_state": "TDS_UNDERPAID",
-            "rationale": "Buyer withheld TDS; Agent reconciles Form 26AS, Baseline accuses of underpayment.",
-            "verdict": "Agent Win (Prevents false underpayment accusation)",
-        },
-        {
-            "case_id": 2,
-            "case_name": "Off-Rail NEFT Payment (UTR Verification)",
-            "debtor_id": "DEB-005",
-            "target_invoice_state": "PAID_OFF_RAIL",
-            "rationale": "UTR submitted; Agent reconciles bank, Baseline demands full payment.",
-            "verdict": "Agent Win (Prevents double-billing good payer)",
-        },
-        {
-            "case_id": 3,
-            "case_name": "Active Dispute (Dispute Triage)",
-            "debtor_id": "DEB-020",
-            "target_invoice_state": "DISPUTED",
-            "rationale": "Disputed within 15 days; Agent routes to dispute resolution, Baseline escalates.",
-            "verdict": "Agent Win (Complies with MSMED s.15 objection rules)",
-        },
-        {
-            "case_id": 4,
-            "case_name": "Trader Ineligible Merchant (MSMED Refusal)",
-            "debtor_id": "DEB-018",
-            "target_invoice_state": "OVERDUE",
-            "rationale": "Agent refuses statutory notice and explains why, Baseline naively cites legal notices.",
-            "verdict": "Agent Win (Avoids unlawful statutory threats)",
-        },
-        {
-            "case_id": 5,
-            "case_name": "VIP Relationship Protection (<5% Exposure)",
-            "debtor_id": "DEB-003",
-            "target_invoice_state": "OVERDUE",
-            "rationale": "Low exposure ratio; Agent protects relationship, Baseline escalates.",
-            "verdict": "Agent Win (Protects high-value customer relationship)",
-        },
-        {
-            "case_id": 6,
-            "case_name": "Opt-Out Debtor (Permanent Suppression)",
-            "debtor_id": "DEB-008",
-            "target_invoice_state": "OVERDUE",
-            "rationale": "Debtor requested opt-out; Agent permanently suppresses contact, Baseline continues spam.",
-            "verdict": "Agent Win (Zero harassment compliance)",
-        },
-        {
-            "case_id": 7,
-            "case_name": "Reliable Late Payer (Restraint over Noise)",
-            "debtor_id": "DEB-006",
-            "target_invoice_state": "OVERDUE",
-            "rationale": "High promise reliability; Agent exercises WAIT restraint, Baseline sends redundant reminder.",
-            "verdict": "Agent Win (Avoids spamming reliable customers)",
-        },
-        {
-            "case_id": 8,
-            "case_name": "Agent Loss / Human Review Fallback",
-            "debtor_id": "DEB-016",
-            "target_invoice_state": "PARTIALLY_PAID",
-            "rationale": "Complex multi-invoice account; Agent routes to HUMAN_HANDOFF while Baseline applies aggressive rule.",
-            "verdict": "Pitch Credibility / Human Fallback (Shows transparent safety boundary)",
-        },
-    ]
 
     matrix_rows: list[dict[str, Any]] = []
     for c in cases:
@@ -539,26 +571,27 @@ def build_adjudication_matrix(
         b_dec = baseline_by_id.get(d_id)
         d_name = a_dec.debtor_name if a_dec else (b_dec.debtor_name if b_dec else d_id)
 
-        # The curated verdict text is authored narrative, true only when this debtor's
-        # ledger row still matches the archetype the case was written to demonstrate --
-        # which is seed-dependent (invoice states are randomised per debtor at generation
-        # time), while the case list itself is not. Show the authored win only when the
-        # target invoice state is actually present AND the agent's strategy actually
-        # differs from the baseline's; otherwise the case does not reproduce at this seed
-        # and the honest thing to print is that, not the authored claim.
+        # The authored verdict is narrative, true only when this debtor's ledger row still
+        # matches the archetype the case demonstrates. Three conditions, all seed-dependent:
+        # the target invoice state is present, the agent diverged from the baseline, and the
+        # agent chose a strategy this archetype is actually about. Drop any one and the
+        # honest output is "does not reproduce", not the authored claim.
         target_state = c["target_invoice_state"]
+        expected = c["expected_agent_strategies"]
         d_invoices = invoices_by_debtor.get(d_id, [])
         case_applies = (
             a_dec is not None
             and b_dec is not None
             and any(i.get("state") == target_state for i in d_invoices)
             and a_dec.strategy != b_dec.strategy
+            and a_dec.strategy.value in expected
         )
         verdict = c["verdict"] if case_applies else "N/A (case does not reproduce at this seed)"
         rationale = c["rationale"] if case_applies else (
             f"Debtor {d_id} does not currently exhibit the {target_state} archetype this "
-            "case demonstrates, or the agent's strategy did not diverge from baseline's; "
-            "re-run at a different --seed to see it, or treat this row as inapplicable."
+            f"case demonstrates, the agent did not diverge from baseline, or the agent's "
+            f"strategy was not one of {sorted(expected)}; re-run at a different --seed to "
+            "see it, or treat this row as inapplicable."
         )
 
         matrix_rows.append({
@@ -586,7 +619,7 @@ def format_table_output(result: ExperimentResult) -> str:
     width = 125
     lines.append("=" * width)
     lines.append(f"  B2B RECEIVABLES RECOVERY AGENT -- EVALUATION BENCHMARK (Seed: {result.seed}, As-Of: {result.as_of})")
-    mode = "Live LLM" if result.is_live_llm else "Deterministic Evaluator (scripted mock, not the live model — pass --live-llm for real decisions)"
+    mode = "Live LLM" if result.is_live_llm else "Deterministic Evaluator (scripted mock, not the live model -- pass --live-llm for real decisions)"
     lines.append(f"  Mode: {mode}")
     lines.append("=" * width)
     lines.append("")
@@ -612,8 +645,9 @@ def format_table_output(result: ExperimentResult) -> str:
     n = m["total_evaluated_debtors"]
     lines.append(f"  * WAIT Restraint Share    : Agent {m['agent_wait_restraint_pct']}% ({m['agent_wait_restraint_count']}/{n}) vs Baseline {m['baseline_wait_restraint_pct']}% ({m['baseline_wait_restraint_count']}/{n})")
     lines.append(f"  * Reconciliation Routing  : Agent {m['reconcile_routing_pct']}% ({m['reconcile_routing_count']}/{n}) accounts directed to Form 26AS / UTR check")
-    lines.append(f"  * Prevented Escalations   : {m['prevented_escalations_count']} accounts spared from premature Day 30+ legal notices")
-    lines.append(f"  * Touch Efficiency        : Agent {m['agent_touches_per_lakh']} touches/Lakh vs Baseline {m['baseline_touches_per_lakh']} touches/Lakh")
+    lines.append(f"  * Prevented Escalations   : {m['prevented_escalations_count']}/{n} accounts where the calendar baseline sent a Day 30+ notice and the agent did not")
+    lines.append("      (the baseline escalates the entire book by construction; the per-case matrix below is where the divergence is substantive)")
+    lines.append(f"  * Touch Efficiency        : Agent {m['agent_touches']} outreach touches ({m['agent_touches_per_lakh']}/Lakh) vs Baseline {m['baseline_touches']} ({m['baseline_touches_per_lakh']}/Lakh)")
     lines.append("")
     lines.append("3. HARD-CASE ADJUDICATION MATRIX (CURATED 8 ARCHETYPES)")
     lines.append("-" * width)
@@ -661,8 +695,8 @@ def format_markdown_output(result: ExperimentResult) -> str:
         "> **Key Restraint & Quality Insights**:",
         f"> - **WAIT Restraint Share**: AI Agent achieved **{m['agent_wait_restraint_pct']}%** restraint ({m['agent_wait_restraint_count']}/{m['total_evaluated_debtors']}) vs Baseline **{m['baseline_wait_restraint_pct']}%** ({m['baseline_wait_restraint_count']}/{m['total_evaluated_debtors']}).",
         f"> - **Reconciliation Routing**: **{m['reconcile_routing_count']} accounts** routed to `RECONCILE` for Form 26AS/UTR checks rather than demanding unowed money.",
-        f"> - **Prevented Premature Escalations**: **{m['prevented_escalations_count']} debtors** protected from aggressive statutory demand notices.",
-        f"> - **Touch Efficiency**: **{m['agent_touches_per_lakh']}** touches per Rs 1 Lakh collected (vs Baseline **{m['baseline_touches_per_lakh']}**).",
+        f"> - **Prevented Escalations**: **{m['prevented_escalations_count']}/{m['total_evaluated_debtors']}** accounts where the baseline sent a Day 30+ notice and the agent did not. The baseline escalates the whole book by construction, so read this alongside the per-case matrix, not on its own.",
+        f"> - **Touch Efficiency**: **{m['agent_touches']}** outreach touches (**{m['agent_touches_per_lakh']}**/Lakh) vs Baseline **{m['baseline_touches']}** (**{m['baseline_touches_per_lakh']}**/Lakh).",
         "",
         "## 3. Curated Hard-Case Adjudication Matrix",
         "",
