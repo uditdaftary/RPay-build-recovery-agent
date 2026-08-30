@@ -1,4 +1,4 @@
-﻿"""Multi-channel dispatch pipeline for recovery communications.
+"""Multi-channel dispatch pipeline for recovery communications.
 
 Supports:
 1. Email via Resend API (with automatic local sandbox fallback in runs/outbox/).
@@ -53,12 +53,13 @@ def dispatch_email(
     from_email = os.getenv("FROM_EMAIL", "recovery@msme-agent.in")
 
     outbox = _ensure_outbox()
-    file_path = outbox / f"{message.debtor_id}_email_{int(time.time())}.txt"
+    file_path = outbox / f"{msg_id}.txt"
     file_path.write_text(
         f"To: {recipient_email}\nFrom: {from_email}\nSubject: {message.subject}\n\n{message.body}",
         encoding="utf-8",
     )
 
+    last_error: str | None = None
     if resend_key and not dry_run:
         try:
             import urllib.request
@@ -97,6 +98,7 @@ def dispatch_email(
                     payload=req_payload,
                 )
         except Exception as exc:
+            last_error = str(exc)
             logger.warning("Resend live dispatch failed (%s); falling back to sandbox", exc)
             audit.record(
                 "channel.email_fallback",
@@ -118,6 +120,7 @@ def dispatch_email(
         channel=Channel.EMAIL,
         message_id=msg_id,
         simulated=True,
+        error=last_error,
         payload={"to": recipient_email, "subject": message.subject, "body": message.body},
     )
 
@@ -137,6 +140,7 @@ def dispatch_whatsapp(
         "recipient_type": "individual",
         "to": recipient_phone,
         "type": "interactive",
+        "dry_run": dry_run,
         "interactive": {
             "type": "button",
             "body": {"text": message.body},
@@ -149,7 +153,7 @@ def dispatch_whatsapp(
         },
     }
 
-    file_path = outbox / f"{message.debtor_id}_whatsapp_{int(time.time())}.json"
+    file_path = outbox / f"{msg_id}.json"
     file_path.write_text(json.dumps(wa_payload, indent=2), encoding="utf-8")
 
     audit.record(
@@ -159,6 +163,7 @@ def dispatch_whatsapp(
         message_id=msg_id,
         language=message.language.value,
         simulated=True,
+        dry_run=dry_run,
         sandbox_path=str(file_path),
     )
 
@@ -180,12 +185,29 @@ def dispatch_message(
 ) -> DispatchResult:
     """Route a drafted message to its target channel dispatcher."""
     if message.channel == Channel.EMAIL:
-        target_email = recipient_email or f"{message.debtor_id.lower()}@example.com"
+        target_email = recipient_email or getattr(message, "recipient_email", None) or f"{message.debtor_id.lower()}@example.com"
         return dispatch_email(message, target_email, dry_run=dry_run)
 
     if message.channel == Channel.WHATSAPP:
-        target_phone = recipient_phone or "+919876543210"
+        target_phone = recipient_phone or getattr(message, "recipient_phone", None) or "+919876543210"
         return dispatch_whatsapp(message, target_phone, dry_run=dry_run)
+
+    if message.channel == Channel.PORTAL:
+        msg_id = f"portal_{message.debtor_id}_{int(time.time() * 1000)}"
+        audit.record(
+            "channel.portal_notification_created",
+            debtor_id=message.debtor_id,
+            message_id=msg_id,
+            subject=message.subject,
+            is_statutory=message.is_statutory,
+        )
+        return DispatchResult(
+            success=True,
+            channel=Channel.PORTAL,
+            message_id=msg_id,
+            simulated=True,
+            payload={"subject": message.subject, "body": message.body},
+        )
 
     audit.record(
         "channel.suppressed_no_contact",

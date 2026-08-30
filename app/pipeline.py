@@ -1,4 +1,4 @@
-﻿"""End-to-End Recovery Pipeline Orchestration.
+"""End-to-End Recovery Pipeline Orchestration.
 
 Connects:
 1. Hard Policy Envelope & AI Strategist (Stage 1 & 2)
@@ -10,6 +10,7 @@ Connects:
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
@@ -41,6 +42,9 @@ def execute_recovery_pipeline(
     """Execute complete end-to-end recovery pipeline across all ledger debtors."""
     from run_experiment import run_deterministic_agent_batch
 
+    # Ensure strategist batch evaluation respects caller's as_of date
+    ledger["as_of"] = as_of.isoformat()
+
     # Use prompt-grounded deterministic evaluator for offline reproducibility
     decisions = run_deterministic_agent_batch(ledger)
     debtors_by_id = {d["debtor_id"]: d for d in ledger["debtors"]}
@@ -56,8 +60,17 @@ def execute_recovery_pipeline(
 
     for dec in decisions:
         debtor = debtors_by_id.get(dec.debtor_id, {})
-        merchant = merchants_by_id.get(debtor.get("merchant_id", "MER-001"), {})
         d_invoices = invoices_by_debtor.get(dec.debtor_id, [])
+
+        debtor_id_str = debtor.get("debtor_id") or dec.debtor_id
+        debtor_name_str = debtor.get("name") or dec.debtor_name
+        name_clean = re.sub(r"[^a-z0-9]", "", debtor_name_str.lower()) if debtor_name_str else ""
+        fallback_email = f"{debtor_id_str.lower()}@{name_clean}.in" if name_clean else f"{debtor_id_str.lower()}@example.com"
+        recipient_email = debtor.get("email") or fallback_email
+        recipient_phone = debtor.get("phone") or "+919876543210"
+
+        merchant_id = debtor.get("merchant_id")
+        merchant = merchants_by_id.get(merchant_id) if merchant_id else None
 
         if debtor.get("opted_out"):
             suppressed_opt_out += 1
@@ -71,7 +84,43 @@ def execute_recovery_pipeline(
             )
             continue
 
-        draft = draft_message_for_decision(dec, debtor, d_invoices, merchant, as_of=as_of)
+        if not merchant:
+            audit.record(
+                "pipeline.merchant_unresolved",
+                debtor_id=dec.debtor_id,
+                merchant_id=merchant_id,
+            )
+            draft = draft_message_for_decision(
+                dec,
+                debtor,
+                d_invoices,
+                {},
+                as_of=as_of,
+                recipient_email=recipient_email,
+                recipient_phone=recipient_phone,
+            )
+            queue_for_review(
+                debtor_id=dec.debtor_id,
+                debtor_name=dec.debtor_name,
+                strategy=dec.strategy.value,
+                ask_amount_paise=dec.ask_amount_paise or 0,
+                reasoning=f"Unresolved merchant ({merchant_id}): {dec.reasoning}",
+                draft=draft,
+                recipient_email=recipient_email,
+                recipient_phone=recipient_phone,
+            )
+            review_queued += 1
+            continue
+
+        draft = draft_message_for_decision(
+            dec,
+            debtor,
+            d_invoices,
+            merchant,
+            as_of=as_of,
+            recipient_email=recipient_email,
+            recipient_phone=recipient_phone,
+        )
 
         if dec.review_required or dec.action_class == ActionClass.REVIEW_REQUIRED:
             queue_for_review(
@@ -81,10 +130,17 @@ def execute_recovery_pipeline(
                 ask_amount_paise=dec.ask_amount_paise or 0,
                 reasoning=dec.reasoning,
                 draft=draft,
+                recipient_email=recipient_email,
+                recipient_phone=recipient_phone,
             )
             review_queued += 1
         elif dec.channel != Channel.NONE:
-            dispatch_message(draft, dry_run=dry_run)
+            dispatch_message(
+                draft,
+                recipient_email=recipient_email,
+                recipient_phone=recipient_phone,
+                dry_run=dry_run,
+            )
             automated_dispatches += 1
 
     result = PipelineRunResult(
