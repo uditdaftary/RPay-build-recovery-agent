@@ -1,6 +1,25 @@
 {% extends "base.html" %}
 {% block content %}
+<style>
+  .wrap { max-width: 1100px !important; padding: 24px 20px 80px; }
+  .nav-link { color: #64748b; text-decoration: none; padding: 6px 12px; border-radius: 6px; font-size: 13px; font-weight: 500; transition: all 0.15s; }
+  .nav-link:hover { color: #0f172a; background: #f1f5f9; }
+  .nav-link.active { color: #4338ca; background: #e0e7ff; font-weight: 600; }
+</style>
 <meta name="operator-key" content="{{ operator_key | default('operator-secret-key') }}">
+
+<nav style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 16px; margin-bottom: 24px; border-bottom: 1px solid #e2e8f0;">
+  <div style="display: flex; align-items: center; gap: 12px;">
+    <span style="font-size: 15px; font-weight: 700; color: #0f172a; letter-spacing: -0.01em;">B2B Receivables Recovery</span>
+    <span style="background: #e0e7ff; color: #4338ca; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px;">AI Agent Console</span>
+  </div>
+  <div style="display: flex; gap: 8px; align-items: center;">
+    <a href="/operator{% if operator_key %}?key={{ operator_key }}{% endif %}" class="nav-link active">Operator Queue</a>
+    <a href="/results" class="nav-link">Results &amp; Benchmark</a>
+    <a href="/r/INV-101" target="_blank" class="nav-link">Demo Token (/r/INV-101) &nearr;</a>
+  </div>
+</nav>
+
 <div class="header" style="margin-bottom: 24px;">
   <div style="display: flex; justify-content: space-between; align-items: flex-start;">
     <div>

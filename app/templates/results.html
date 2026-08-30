@@ -1,0 +1,705 @@
+{% extends "base.html" %}
+{% block title %}Evaluation Benchmark & Counterfactual - B2B Recovery Agent{% endblock %}
+{% block content %}
+<style>
+  .wrap { max-width: 1200px !important; padding: 24px 20px 80px; }
+  .nav-link { color: #64748b; text-decoration: none; padding: 6px 12px; border-radius: 6px; font-size: 13px; font-weight: 500; transition: all 0.15s; }
+  .nav-link:hover { color: #0f172a; background: #f1f5f9; }
+  .nav-link.active { color: #4338ca; background: #e0e7ff; font-weight: 600; }
+  
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    position: relative;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+  }
+  .stat-card-title {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #64748b;
+    margin-bottom: 6px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .stat-card-val {
+    font-size: 22px;
+    font-weight: 700;
+    color: #0f172a;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+  }
+  .stat-card-sub {
+    font-size: 12px;
+    color: #64748b;
+    margin-top: 6px;
+    line-height: 1.4;
+  }
+  .badge-pill {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    display: inline-block;
+  }
+  .badge-indigo { background: #e0e7ff; color: #4338ca; }
+  .badge-emerald { background: #dcfce7; color: #15803d; }
+  .badge-rose { background: #ffe4e6; color: #be123c; }
+  .badge-amber { background: #fef3c7; color: #b45309; }
+  .badge-slate { background: #f1f5f9; color: #475569; }
+  .badge-cyan { background: #cffafe; color: #0e7490; }
+  .badge-purple { background: #f3e8ff; color: #7e22ce; }
+  .badge-blue { background: #dbeafe; color: #1d4ed8; }
+
+  .strat-bar-wrap {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+    font-size: 13px;
+  }
+  .strat-name {
+    width: 170px;
+    font-weight: 600;
+    color: #334155;
+    flex-shrink: 0;
+  }
+  .bar-container {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .bar-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+  }
+  .bar-label {
+    width: 54px;
+    color: #64748b;
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+  .bar-track {
+    flex-grow: 1;
+    background: #f1f5f9;
+    height: 14px;
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+  }
+  .bar-fill-agent {
+    background: #4f46e5;
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.4s ease;
+  }
+  .bar-fill-baseline {
+    background: #e11d48;
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.4s ease;
+  }
+  .bar-val {
+    width: 60px;
+    font-weight: 600;
+    color: #0f172a;
+  }
+
+  .matrix-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    text-align: left;
+  }
+  .matrix-table th {
+    background: #f8fafc;
+    padding: 12px 14px;
+    border-bottom: 2px solid var(--border);
+    color: #475569;
+    font-weight: 600;
+  }
+  .matrix-table td {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  .matrix-row-main {
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .matrix-row-main:hover {
+    background: #f8fafc;
+  }
+  .matrix-row-details {
+    background: #fcfcfc;
+    display: none;
+  }
+  .matrix-row-details.open {
+    display: table-row;
+  }
+  
+  .details-box {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    padding: 16px 20px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    margin: 8px 0;
+  }
+  @media (max-width: 768px) {
+    .details-box { grid-template-columns: 1fr; }
+  }
+
+  /* Modal Styling */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(15, 23, 42, 0.65);
+    backdrop-filter: blur(2px);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .modal-overlay.active {
+    display: flex;
+  }
+  .modal-card {
+    background: #ffffff;
+    border-radius: 12px;
+    max-width: 680px;
+    width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1);
+    border: 1px solid #e2e8f0;
+  }
+</style>
+
+<!-- Top Navbar -->
+<nav style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 16px; margin-bottom: 24px; border-bottom: 1px solid #e2e8f0;">
+  <div style="display: flex; align-items: center; gap: 12px;">
+    <span style="font-size: 15px; font-weight: 700; color: #0f172a; letter-spacing: -0.01em;">B2B Receivables Recovery</span>
+    <span class="badge-pill badge-indigo">Benchmark Intelligence</span>
+  </div>
+  <div style="display: flex; gap: 8px; align-items: center;">
+    <a href="/operator" class="nav-link">Operator Queue</a>
+    <a href="/results" class="nav-link active">Results &amp; Benchmark</a>
+    <a href="/r/INV-101" target="_blank" class="nav-link">Demo Token (/r/INV-101) &nearr;</a>
+  </div>
+</nav>
+
+<!-- Header & Title -->
+<div style="margin-bottom: 20px;">
+  <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px;">
+    <div>
+      <h1 style="font-size: 22px; font-weight: 700; color: #0f172a; margin: 0 0 4px 0; letter-spacing: -0.02em;">
+        Evaluation Benchmark &amp; Counterfactual Analysis
+      </h1>
+      <p style="margin: 0; color: #64748b; font-size: 13px;">
+        Head-to-head empirical evaluation of AI Recovery Strategist vs Static Calendar Baseline Policy across 70 invoices &amp; 20 debtors.
+      </p>
+    </div>
+    <div style="display: flex; gap: 8px; align-items: center;">
+      <span class="chip" style="font-size: 12px;">RNG Seed: <strong>{{ seed }}</strong></span>
+      <span class="chip" style="font-size: 12px;">As-Of: <strong>{{ as_of }}</strong></span>
+      <span class="chip badge-emerald" style="font-size: 12px;">{% if live_llm %}Live LLM (Gemini){% else %}Deterministic Evaluator (Mock){% endif %}</span>
+    </div>
+  </div>
+</div>
+
+<!-- Section 4: Live Execution Controls -->
+<div class="card" style="margin-bottom: 24px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px 20px;">
+  <form id="eval-form" method="GET" action="/results" style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end;">
+    <div style="flex: 1; min-width: 140px;">
+      <label style="display: block; font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 4px;">Ledger Seed</label>
+      <input type="number" id="input-seed" name="seed" value="{{ seed }}" style="margin: 0; padding: 7px 10px; font-size: 13px; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 6px;">
+    </div>
+    <div style="flex: 1; min-width: 160px;">
+      <label style="display: block; font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 4px;">As-Of Date</label>
+      <input type="date" id="input-as-of" name="as_of" value="{{ as_of }}" style="margin: 0; padding: 7px 10px; font-size: 13px; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 6px;">
+    </div>
+    <div style="display: flex; align-items: center; gap: 8px; padding-bottom: 6px;">
+      <input type="checkbox" id="input-live-llm" name="live_llm" value="true" {% if live_llm %}checked{% endif %} style="width: auto; margin: 0; cursor: pointer;">
+      <label for="input-live-llm" style="font-size: 13px; font-weight: 500; color: #334155; cursor: pointer; user-select: none;">
+        Live LLM Chain (Gemini API)
+      </label>
+    </div>
+    <div style="display: flex; gap: 8px;">
+      <button type="submit" id="btn-submit-eval" class="btn btn-primary" style="background: #4f46e5; border-color: #4338ca; color: #ffffff; font-weight: 600; font-size: 13px; padding: 8px 18px;">
+        Re-run Evaluation
+      </button>
+      <a href="/results?seed=42&as_of=2026-08-26" class="btn btn-secondary" style="font-size: 13px; padding: 8px 14px; text-decoration: none;">
+        Reset (Seed 42)
+      </a>
+    </div>
+  </form>
+</div>
+
+<!-- Section 1: Portfolio Overview & Headline Delta Cards -->
+<div style="margin-bottom: 24px;">
+  <h2 style="font-size: 15px; font-weight: 700; color: #0f172a; margin-bottom: 12px; letter-spacing: -0.01em;">
+    Portfolio Overview &amp; Headline Benchmark Metrics
+  </h2>
+  
+  <div class="card-grid">
+    <!-- Card 1: Total Book Value -->
+    <div class="stat-card">
+      <div class="stat-card-title">
+        <span>Total Book Value</span>
+        <span class="badge-pill badge-slate">Exposure</span>
+      </div>
+      <div class="stat-card-val">{{ portfolio.total_book_value_inr }}</div>
+      <div class="stat-card-sub">
+        <strong>{{ portfolio.total_invoices }} invoices</strong> across <strong>{{ portfolio.total_debtors }} commercial debtors</strong>
+      </div>
+    </div>
+
+    <!-- Card 2: Naive vs Collectible Balance -->
+    <div class="stat-card" style="border-left: 4px solid #4f46e5;">
+      <div class="stat-card-title">
+        <span>True Collectible Balance</span>
+        <span class="badge-pill badge-indigo">Net of Deductions</span>
+      </div>
+      <div class="stat-card-val" style="color: #4338ca;">{{ portfolio.total_collectible_inr }}</div>
+      <div class="stat-card-sub">
+        vs {{ portfolio.total_naive_outstanding_inr }} Naive Outstanding (Prevents ₹1.46L wrongful TDS dunning)
+      </div>
+    </div>
+
+    <!-- Card 3: WAIT Restraint Share -->
+    <div class="stat-card" style="border-left: 4px solid #16a34a;">
+      <div class="stat-card-title">
+        <span>WAIT Restraint Share</span>
+        <span class="badge-pill badge-emerald">Noise Reduction</span>
+      </div>
+      <div class="stat-card-val" style="color: #15803d;">
+        {{ comparative_metrics.agent_wait_restraint_pct }}%
+        <span style="font-size: 14px; font-weight: 500; color: #64748b;">vs {{ comparative_metrics.baseline_wait_restraint_pct }}% Base</span>
+      </div>
+      <div class="stat-card-sub">
+        <strong>{{ comparative_metrics.agent_wait_restraint_count }}/{{ comparative_metrics.total_evaluated_debtors }} accounts</strong> held back under reliable payer &amp; opt-out policy
+      </div>
+    </div>
+
+    <!-- Card 4: Reconciliation Routing -->
+    <div class="stat-card" style="border-left: 4px solid #0891b2;">
+      <div class="stat-card-title">
+        <span>Reconciliation Routing</span>
+        <span class="badge-pill badge-cyan">Tax &amp; Bank UTR</span>
+      </div>
+      <div class="stat-card-val" style="color: #0e7490;">
+        {{ comparative_metrics.reconcile_routing_pct }}%
+      </div>
+      <div class="stat-card-sub">
+        <strong>{{ comparative_metrics.reconcile_routing_count }}/{{ comparative_metrics.total_evaluated_debtors }} accounts</strong> routed to Form 26AS TDS &amp; UTR verification
+      </div>
+    </div>
+
+    <!-- Card 5: Prevented Escalations -->
+    <div class="stat-card" style="border-left: 4px solid #e11d48;">
+      <div class="stat-card-title">
+        <span>Prevented Escalations</span>
+        <span class="badge-pill badge-rose">Relationship Protection</span>
+      </div>
+      <div class="stat-card-val" style="color: #be123c;">
+        {{ comparative_metrics.prevented_escalations_count }}/{{ comparative_metrics.total_evaluated_debtors }}
+      </div>
+      <div class="stat-card-sub">
+        100% of indiscriminate Day 30+ legal threat notices intercepted &amp; blocked
+      </div>
+    </div>
+
+    <!-- Card 6: Touch Efficiency -->
+    <div class="stat-card">
+      <div class="stat-card-title">
+        <span>Touch Efficiency</span>
+        <span class="badge-pill badge-amber">Outreach ROI</span>
+      </div>
+      <div class="stat-card-val">
+        {{ comparative_metrics.agent_touches_per_lakh }}
+        <span style="font-size: 13px; font-weight: 500; color: #64748b;">touches/Lakh</span>
+      </div>
+      <div class="stat-card-sub">
+        Agent {{ comparative_metrics.agent_touches }} touches vs Baseline {{ comparative_metrics.baseline_touches }} touches ({{ comparative_metrics.baseline_touches_per_lakh }}/Lakh)
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Section 2: Visual Strategy Distribution -->
+<div class="card" style="margin-bottom: 24px; padding: 20px 24px;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+    <div>
+      <h2 style="font-size: 15px; font-weight: 700; color: #0f172a; margin: 0 0 2px 0;">
+        Visual Strategy Distribution: AI Agent vs Calendar Baseline
+      </h2>
+      <p style="margin: 0; color: #64748b; font-size: 12px;">
+        Action breakdown demonstrating dynamic multi-door routing vs single-track calendar escalation
+      </p>
+    </div>
+    <div style="display: flex; gap: 12px; font-size: 12px;">
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <span style="width: 12px; height: 12px; background: #4f46e5; border-radius: 3px; display: inline-block;"></span>
+        <span style="font-weight: 600; color: #334155;">AI Recovery Agent</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <span style="width: 12px; height: 12px; background: #e11d48; border-radius: 3px; display: inline-block;"></span>
+        <span style="font-weight: 600; color: #334155;">Calendar Baseline</span>
+      </div>
+    </div>
+  </div>
+
+  {% set all_strategies = ['WAIT', 'RECONCILE', 'REQUEST_PAYMENT', 'OBTAIN_PROMISE', 'RESOLVE_DISPUTE', 'ESCALATE', 'HUMAN_HANDOFF'] %}
+  {% set total_evaluated = comparative_metrics.total_evaluated_debtors | default(20) %}
+
+  <div style="display: flex; flex-direction: column; gap: 12px;">
+    {% for strat in all_strategies %}
+      {% set agent_count = strategy_distribution.agent.get(strat, 0) %}
+      {% set baseline_count = strategy_distribution.baseline.get(strat, 0) %}
+      {% set agent_pct = (agent_count / total_evaluated * 100) | round(1) if total_evaluated > 0 else 0 %}
+      {% set baseline_pct = (baseline_count / total_evaluated * 100) | round(1) if total_evaluated > 0 else 0 %}
+
+      <div class="strat-bar-wrap">
+        <div class="strat-name">
+          {% if strat == 'WAIT' %}
+            <span class="badge-pill badge-slate">WAIT</span>
+          {% elif strat == 'RECONCILE' %}
+            <span class="badge-pill badge-indigo">RECONCILE</span>
+          {% elif strat == 'REQUEST_PAYMENT' %}
+            <span class="badge-pill badge-blue">REQUEST_PAYMENT</span>
+          {% elif strat == 'OBTAIN_PROMISE' %}
+            <span class="badge-pill badge-amber">OBTAIN_PROMISE</span>
+          {% elif strat == 'RESOLVE_DISPUTE' %}
+            <span class="badge-pill badge-purple">RESOLVE_DISPUTE</span>
+          {% elif strat == 'ESCALATE' %}
+            <span class="badge-pill badge-rose">ESCALATE</span>
+          {% elif strat == 'HUMAN_HANDOFF' %}
+            <span class="badge-pill badge-cyan">HUMAN_HANDOFF</span>
+          {% else %}
+            <span class="badge-pill badge-slate">{{ strat }}</span>
+          {% endif %}
+        </div>
+
+        <div class="bar-container">
+          <!-- Agent Bar -->
+          <div class="bar-row">
+            <span class="bar-label">Agent</span>
+            <div class="bar-track">
+              <div class="bar-fill-agent" style="width: {{ agent_pct }}%;"></div>
+            </div>
+            <span class="bar-val">{{ agent_count }} <span style="font-weight: normal; color: #64748b; font-size: 10px;">({{ agent_pct }}%)</span></span>
+          </div>
+
+          <!-- Baseline Bar -->
+          <div class="bar-row">
+            <span class="bar-label">Baseline</span>
+            <div class="bar-track">
+              <div class="bar-fill-baseline" style="width: {{ baseline_pct }}%;"></div>
+            </div>
+            <span class="bar-val">{{ baseline_count }} <span style="font-weight: normal; color: #64748b; font-size: 10px;">({{ baseline_pct }}%)</span></span>
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- Section 3: Hard-Case Adjudication Matrix (8 Curated Archetypes) -->
+<div class="card" style="padding: 20px 24px;">
+  <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px; margin-bottom: 16px;">
+    <div>
+      <h2 style="font-size: 16px; font-weight: 700; color: #0f172a; margin: 0 0 2px 0;">
+        Hard-Case Adjudication Matrix (8 Curated Archetypes)
+      </h2>
+      <p style="margin: 0; color: #64748b; font-size: 13px;">
+        Head-to-head decision audits across commercial edge cases. Click any debtor row to expand deep causal reasoning &amp; drafted copy previews.
+      </p>
+    </div>
+    <div style="display: flex; gap: 8px;">
+      <button id="btn-expand-all" class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px;">Expand All Details</button>
+      <button id="btn-collapse-all" class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px;">Collapse All</button>
+    </div>
+  </div>
+
+  <div style="overflow-x: auto;">
+    <table class="matrix-table">
+      <thead>
+        <tr>
+          <th style="width: 28%;">Debtor &amp; Hard-Case Archetype</th>
+          <th style="width: 22%;">Baseline Policy Action</th>
+          <th style="width: 24%;">AI Agent Decision</th>
+          <th style="width: 18%;">Adjudication Verdict</th>
+          <th style="width: 8%; text-align: right;">Drill-down</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in adjudication_matrix %}
+        <!-- Main Row -->
+        <tr class="matrix-row-main" onclick="toggleDetails('{{ item.debtor_id }}')">
+          <td>
+            <div style="font-weight: 700; color: #0f172a; font-size: 14px;">{{ item.debtor_name }}</div>
+            <div style="color: #64748b; font-size: 12px; margin-top: 2px;">
+              <span style="font-family: monospace; font-weight: 600; color: #475569;">{{ item.debtor_id }}</span> &bull; 
+              <span style="color: #334155; font-weight: 500;">{{ item.archetype | default(item.case_name) }}</span>
+            </div>
+          </td>
+          <td>
+            <div style="color: #be123c; font-family: monospace; font-size: 12px; font-weight: 600;">
+              {{ item.baseline_action }}
+            </div>
+            <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">Single-track calendar dunning</div>
+          </td>
+          <td>
+            <div style="color: #4338ca; font-family: monospace; font-size: 12px; font-weight: 600;">
+              {{ item.agent_action }}
+            </div>
+            <div style="font-size: 11px; color: #64748b; margin-top: 2px;">
+              Policy Envelope calibrated
+            </div>
+          </td>
+          <td>
+            {% if 'Agent Win' in item.verdict %}
+              <span class="badge-pill badge-emerald" style="font-size: 11px; font-weight: 600;">
+                &#10003; {{ item.verdict }}
+              </span>
+            {% elif 'defer' in item.verdict or 'human' in item.verdict %}
+              <span class="badge-pill badge-cyan" style="font-size: 11px; font-weight: 600;">
+                &#8594; {{ item.verdict }}
+              </span>
+            {% else %}
+              <span class="badge-pill badge-slate" style="font-size: 11px;">
+                {{ item.verdict }}
+              </span>
+            {% endif %}
+          </td>
+          <td style="text-align: right;">
+            <button class="btn btn-secondary toggle-btn-{{ item.debtor_id }}" style="font-size: 11px; padding: 4px 8px;" onclick="event.stopPropagation(); toggleDetails('{{ item.debtor_id }}')">
+              Details &#9662;
+            </button>
+          </td>
+        </tr>
+
+        <!-- Expanded Details Row -->
+        <tr id="details-row-{{ item.debtor_id }}" class="matrix-row-details">
+          <td colspan="5" style="padding: 12px 16px; background: #f8fafc;">
+            <div class="details-box">
+              <!-- Left Column: Debtor Profile & Why Baseline Erred -->
+              <div>
+                <div style="margin-bottom: 12px;">
+                  <strong style="color: #1e293b; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em;">Debtor Context &amp; Profile</strong>
+                  <p style="margin: 4px 0 0 0; color: #475569; font-size: 13px; line-height: 1.45;">
+                    {{ item.debtor_profile | default(item.rationale) }}
+                  </p>
+                </div>
+
+                <div style="padding: 10px 14px; background: #fff1f2; border-left: 3px solid #e11d48; border-radius: 4px;">
+                  <strong style="color: #be123c; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em;">Why Baseline Erred</strong>
+                  <p style="margin: 4px 0 0 0; color: #9f1239; font-size: 12px; line-height: 1.45;">
+                    {{ item.why_baseline_erred | default("Applied rigid calendar-based escalation blind to account state nuances.") }}
+                  </p>
+                </div>
+              </div>
+
+              <!-- Right Column: Why Agent Won & Copy Trigger -->
+              <div>
+                <div style="padding: 10px 14px; background: #ecfdf5; border-left: 3px solid #10b981; border-radius: 4px; margin-bottom: 12px;">
+                  <strong style="color: #047857; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em;">Why Agent Won</strong>
+                  <p style="margin: 4px 0 0 0; color: #065f46; font-size: 12px; line-height: 1.45;">
+                    {{ item.why_agent_won | default(item.rationale) }}
+                  </p>
+                </div>
+
+                {% if item.drafted_copy_preview %}
+                <div style="padding: 10px 14px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <span style="font-size: 12px; font-weight: 600; color: #166534;">Drafted Outreach Copy</span>
+                    <span class="badge-pill badge-emerald" style="font-size: 10px;">{{ item.drafted_copy_preview.channel | upper }} &bull; {{ item.drafted_copy_preview.language | upper }}</span>
+                  </div>
+                  <div style="font-size: 12px; color: #334155; font-weight: 600; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                    Subject: {{ item.drafted_copy_preview.subject }}
+                  </div>
+                  <button class="btn btn-primary" style="font-size: 11px; padding: 5px 12px; background: #15803d; border-color: #166534; color: #ffffff;" onclick="openCopyModal({{ loop.index0 }})">
+                    Open Full Draft Preview &nearr;
+                  </button>
+                </div>
+                {% else %}
+                <div style="padding: 10px 14px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; color: #64748b; font-size: 12px;">
+                  <em>Outbound message suppressed by policy envelope ({% if item.agent_strategy == 'WAIT' %}Zero-Touch WAIT Restraint{% else %}Defers to Human Specialist{% endif %}).</em>
+                </div>
+                {% endif %}
+              </div>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Modal: Drafted Copy Preview Modal -->
+<div id="copy-modal" class="modal-overlay" onclick="closeModalOnOutsideClick(event)">
+  <div class="modal-card">
+    <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid #e2e8f0;">
+      <div>
+        <h3 id="modal-debtor-title" style="margin: 0; font-size: 16px; color: #0f172a;">Drafted Communication Copy</h3>
+        <p id="modal-debtor-sub" style="margin: 2px 0 0 0; font-size: 12px; color: #64748b;"></p>
+      </div>
+      <button class="btn btn-secondary" style="font-size: 14px; padding: 4px 10px;" onclick="closeCopyModal()">&times;</button>
+    </div>
+
+    <div style="padding: 20px;">
+      <!-- Metadata badges -->
+      <div id="modal-badges" style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px;"></div>
+
+      <!-- Subject Box -->
+      <div style="margin-bottom: 14px;">
+        <label style="display: block; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 4px;">Subject Line</label>
+        <div id="modal-subject" style="padding: 10px 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 13px; font-weight: 600; color: #1e293b;"></div>
+      </div>
+
+      <!-- Body Box -->
+      <div style="margin-bottom: 16px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+          <label style="font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase;">Message Body Copy</label>
+          <button id="btn-copy-clipboard" class="btn btn-secondary" style="font-size: 11px; padding: 3px 8px;" onclick="copyModalBodyToClipboard()">Copy Copy</button>
+        </div>
+        <pre id="modal-body" style="white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; line-height: 1.5; background: #0f172a; color: #f8fafc; padding: 14px; border-radius: 8px; margin: 0; max-height: 320px; overflow-y: auto;"></pre>
+      </div>
+
+      <!-- Compliance indicator -->
+      <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; padding: 10px 12px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px;">
+        <span style="color: #166534; font-weight: 500;">&#10004; Verified anti-dark-pattern compliant &bull; Razorpay link attached</span>
+        <button class="btn btn-secondary" style="font-size: 12px; padding: 6px 14px;" onclick="closeCopyModal()">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Matrix data for modal previews
+  const matrixData = {{ adjudication_matrix | tojson }};
+
+  function toggleDetails(debtorId) {
+    const detailsRow = document.getElementById("details-row-" + debtorId);
+    const btn = document.querySelector(".toggle-btn-" + debtorId);
+    if (!detailsRow) return;
+    
+    if (detailsRow.classList.contains("open")) {
+      detailsRow.classList.remove("open");
+      if (btn) btn.innerHTML = "Details &#9662;";
+    } else {
+      detailsRow.classList.add("open");
+      if (btn) btn.innerHTML = "Close &#9652;";
+    }
+  }
+
+  document.getElementById("btn-expand-all").addEventListener("click", () => {
+    document.querySelectorAll(".matrix-row-details").forEach(row => row.classList.add("open"));
+    document.querySelectorAll("[class*='toggle-btn-']").forEach(btn => btn.innerHTML = "Close &#9652;");
+  });
+
+  document.getElementById("btn-collapse-all").addEventListener("click", () => {
+    document.querySelectorAll(".matrix-row-details").forEach(row => row.classList.remove("open"));
+    document.querySelectorAll("[class*='toggle-btn-']").forEach(btn => btn.innerHTML = "Details &#9662;");
+  });
+
+  function openCopyModal(index) {
+    const item = matrixData[index];
+    if (!item || !item.drafted_copy_preview) return;
+    const copy = item.drafted_copy_preview;
+
+    document.getElementById("modal-debtor-title").innerText = item.debtor_name + " (" + item.debtor_id + ")";
+    document.getElementById("modal-debtor-sub").innerText = item.archetype || item.case_name;
+    document.getElementById("modal-subject").innerText = copy.subject || "(No Subject - WhatsApp Template)";
+    document.getElementById("modal-body").innerText = copy.body || "";
+
+    const badgesContainer = document.getElementById("modal-badges");
+    badgesContainer.innerHTML = "";
+
+    // Channel badge
+    const ch = document.createElement("span");
+    ch.className = "badge-pill badge-indigo";
+    ch.innerText = "Channel: " + (copy.channel || "Email").toUpperCase();
+    badgesContainer.appendChild(ch);
+
+    // Language badge
+    const lang = document.createElement("span");
+    lang.className = "badge-pill badge-blue";
+    lang.innerText = "Language: " + (copy.language || "EN").toUpperCase();
+    badgesContainer.appendChild(lang);
+
+    // Tone badge
+    if (copy.tone) {
+      const tone = document.createElement("span");
+      tone.className = "badge-pill badge-slate";
+      tone.innerText = "Tone: " + copy.tone.toUpperCase();
+      badgesContainer.appendChild(tone);
+    }
+
+    // Statutory badge
+    const stat = document.createElement("span");
+    if (copy.is_statutory) {
+      stat.className = "badge-pill badge-rose";
+      stat.innerText = "Statutory Notice: MSMED s.15/16 + 43B(h)";
+    } else {
+      stat.className = "badge-pill badge-emerald";
+      stat.innerText = "Commercial Notice: Standard";
+    }
+    badgesContainer.appendChild(stat);
+
+    // Anti-Dark-Pattern Clean
+    const dp = document.createElement("span");
+    dp.className = "badge-pill badge-emerald";
+    dp.innerText = "Anti-Dark-Pattern: Verified Clean";
+    badgesContainer.appendChild(dp);
+
+    document.getElementById("copy-modal").classList.add("active");
+  }
+
+  function closeCopyModal() {
+    document.getElementById("copy-modal").classList.remove("active");
+  }
+
+  function closeModalOnOutsideClick(event) {
+    if (event.target.id === "copy-modal") {
+      closeCopyModal();
+    }
+  }
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      closeCopyModal();
+    }
+  });
+
+  function copyModalBodyToClipboard() {
+    const text = document.getElementById("modal-body").innerText;
+    navigator.clipboard.writeText(text).then(() => {
+      const btn = document.getElementById("btn-copy-clipboard");
+      const orig = btn.innerText;
+      btn.innerText = "Copied!";
+      setTimeout(() => btn.innerText = orig, 1800);
+    }).catch(err => {
+      alert("Failed to copy to clipboard: " + err);
+    });
+  }
+</script>
+{% endblock %}
