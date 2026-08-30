@@ -1,0 +1,132 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<div class="header" style="margin-bottom: 24px;">
+  <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+    <div>
+      <h1 style="margin: 0 0 8px 0; font-size: 22px; color: #0f172a;">Recovery Operator Console</h1>
+      <p style="margin: 0; font-size: 13px; color: #64748b;">
+        Razorpay Design Principles: Review-First Mode for High-Stakes Actions & Instant Kill Switch
+      </p>
+    </div>
+    <div style="display: flex; gap: 8px;">
+      <a href="/api/operator/export?format=json" class="btn btn-secondary" download="audit_events.json" style="padding: 8px 12px; font-size: 12px; text-decoration: none; display: inline-block;">Export JSON</a>
+      <a href="/api/operator/export?format=csv" class="btn btn-secondary" download="audit_events.csv" style="padding: 8px 12px; font-size: 12px; text-decoration: none; display: inline-block;">Export CSV</a>
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom: 24px; border-left: 4px solid {% if kill_switch_active %}#ef4444{% else %}#10b981{% endif %};">
+  <div style="display: flex; justify-content: space-between; align-items: center;">
+    <div>
+      <h2 style="margin: 0 0 4px 0; font-size: 16px; color: #0f172a;">Master Agent Kill Switch</h2>
+      <p style="margin: 0; font-size: 13px; color: #64748b;">
+        "Turn off any agent at any time. One tap. Immediate." — Instantly blocks all outbound communications.
+      </p>
+    </div>
+    <div>
+      <button id="toggle-kill-switch" class="btn {% if kill_switch_active %}btn-primary{% else %}btn-secondary{% endif %}" style="background-color: {% if kill_switch_active %}#ef4444{% else %}#0f172a{% endif %}; color: #fff; min-width: 140px;">
+        {% if kill_switch_active %}Kill Switch: ACTIVE (Click to Resume){% else %}Engage Kill Switch{% endif %}
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h2 style="margin: 0 0 16px 0; font-size: 16px; color: #0f172a;">Review-First Mode: Pending Human Approvals ({{ queue | length }})</h2>
+  {% if queue %}
+  <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+    <thead>
+      <tr style="border-bottom: 2px solid #e2e8f0; text-align: left; color: #64748b;">
+        <th style="padding: 8px;">Debtor</th>
+        <th style="padding: 8px;">Strategy</th>
+        <th style="padding: 8px;">Ask Amount</th>
+        <th style="padding: 8px;">Channel</th>
+        <th style="padding: 8px;">Statutory</th>
+        <th style="padding: 8px; text-align: right;">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in queue %}
+      <tr style="border-bottom: 1px solid #f1f5f9;" id="row-{{ item.debtor_id }}">
+        <td style="padding: 12px 8px;"><strong>{{ item.debtor_name }}</strong><br><span style="color: #94a3b8; font-size: 11px;">{{ item.debtor_id }}</span></td>
+        <td style="padding: 12px 8px;"><span class="badge" style="background: #fef3c7; color: #92400e; padding: 3px 8px; border-radius: 4px;">{{ item.strategy }}</span></td>
+        <td style="padding: 12px 8px;">{{ item.ask_amount_display }}</td>
+        <td style="padding: 12px 8px;">{{ item.channel | upper }} ({{ item.language | upper }})</td>
+        <td style="padding: 12px 8px;">
+          {% if item.is_statutory %}
+          <span style="color: #dc2626; font-weight: 600;">MSMED s.15/16 + 43B(h)</span>
+          {% else %}
+          <span style="color: #64748b;">Commercial</span>
+          {% endif %}
+        </td>
+        <td style="padding: 12px 8px; text-align: right;">
+          <button onclick="approveItem('{{ item.debtor_id }}')" class="btn btn-primary" style="padding: 6px 12px; font-size: 12px; margin-right: 4px;">Approve & Send</button>
+          <button onclick="rejectItem('{{ item.debtor_id }}')" class="btn btn-secondary" style="padding: 6px 12px; font-size: 12px;">Reject</button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="margin: 0; color: #64748b; font-size: 13px; padding: 16px 0;">No high-stakes actions pending operator review. All clear.</p>
+  {% endif %}
+</div>
+
+<script>
+  let killSwitchState = {{ 'true' if kill_switch_active else 'false' }};
+
+  document.getElementById("toggle-kill-switch").addEventListener("click", async () => {
+    const newState = !killSwitchState;
+    try {
+      const res = await fetch("/api/operator/kill-switch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active: newState }),
+      });
+      if (res.ok) {
+        window.location.reload();
+      }
+    } catch (err) {
+      alert("Error toggling kill switch: " + err);
+    }
+  });
+
+  async function approveItem(debtorId) {
+    try {
+      const res = await fetch("/api/operator/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ debtor_id: debtorId }),
+      });
+      const data = await res.json();
+      if (data.approved) {
+        const row = document.getElementById("row-" + debtorId);
+        if (row) row.remove();
+        alert("Approved & dispatched for " + debtorId);
+      } else {
+        alert("Could not approve: " + (data.error || "unknown error"));
+      }
+    } catch (err) {
+      alert("Approval failed: " + err);
+    }
+  }
+
+  async function rejectItem(debtorId) {
+    const reason = prompt("Enter rejection reason for audit log:", "Operator commercial override");
+    if (!reason) return;
+    try {
+      const res = await fetch("/api/operator/reject", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ debtor_id: debtorId, reason: reason }),
+      });
+      if (res.ok) {
+        const row = document.getElementById("row-" + debtorId);
+        if (row) row.remove();
+      }
+    } catch (err) {
+      alert("Rejection failed: " + err);
+    }
+  }
+</script>
+{% endblock %}

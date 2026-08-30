@@ -22,7 +22,7 @@ from datetime import date, timedelta
 import razorpay
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, field_validator
 
@@ -626,4 +626,81 @@ def raise_dispute(body: DisputeRequest) -> JSONResponse:
             "statutory_clock_suspended": statutory_clock_suspended,
         }
     )
+
+
+# ---------------------------------------------------------------------------
+# Operator Console: Review-First Mode, Kill Switch & Audit Exporter
+# ---------------------------------------------------------------------------
+
+from app.operator import (
+    approve_review_item,
+    export_audit_events,
+    get_review_queue,
+    is_kill_switch_active,
+    reject_review_item,
+    set_kill_switch,
+)
+
+
+class KillSwitchRequest(BaseModel):
+    active: bool
+
+
+class ReviewActionRequest(BaseModel):
+    debtor_id: str
+    reason: str | None = None
+
+
+@app.get("/operator", response_class=HTMLResponse)
+def operator_dashboard(request: Request) -> HTMLResponse:
+    """Render operator dashboard with live kill switch and review queue."""
+    return templates.TemplateResponse(
+        request,
+        "operator.html",
+        {
+            "kill_switch_active": is_kill_switch_active(),
+            "queue": get_review_queue(),
+        },
+    )
+
+
+@app.post("/api/operator/kill-switch")
+def toggle_kill_switch(body: KillSwitchRequest) -> JSONResponse:
+    """Engage or disengage the master agent kill switch immediately."""
+    new_state = set_kill_switch(body.active)
+    return JSONResponse({"kill_switch_active": new_state})
+
+
+@app.get("/api/operator/queue")
+def list_review_queue() -> JSONResponse:
+    """Return all pending review-first actions."""
+    return JSONResponse({"queue": get_review_queue()})
+
+
+@app.post("/api/operator/approve")
+def approve_action(body: ReviewActionRequest) -> JSONResponse:
+    """Approve a review-first action and dispatch to communication channel."""
+    res = approve_review_item(body.debtor_id)
+    if res is None:
+        return JSONResponse({"error": "debtor not found in review queue"}, status_code=404)
+    return JSONResponse(res)
+
+
+@app.post("/api/operator/reject")
+def reject_action(body: ReviewActionRequest) -> JSONResponse:
+    """Reject a review-first action with a logged reason."""
+    reason = body.reason or "Operator manual rejection"
+    ok = reject_review_item(body.debtor_id, reason)
+    if not ok:
+        return JSONResponse({"error": "debtor not found in review queue"}, status_code=404)
+    return JSONResponse({"rejected": True, "debtor_id": body.debtor_id, "reason": reason})
+
+
+@app.get("/api/operator/export")
+def export_audit_log(format: str = "json") -> Response:
+    """Export complete audit trail in JSON or CSV format."""
+    exported = export_audit_events(format_type=format)
+    media_type = "application/json" if format.lower() == "json" else "text/csv"
+    return Response(content=exported, media_type=media_type)
+
 
