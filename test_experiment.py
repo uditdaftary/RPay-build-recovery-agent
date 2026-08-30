@@ -24,11 +24,25 @@ from app.strategist import StrategistDecision
 
 class TestExperimentRunner(unittest.TestCase):
     def setUp(self) -> None:
+        # Every test that runs a decision batch must fold a clean audit log, not the
+        # developer's live audit/events.jsonl -- otherwise the restraint and routing
+        # assertions below are satisfied by decisions shaped by dev residue and pass
+        # only on this machine. The runner isolates internally; the batch helpers the
+        # tests call directly do not, so isolation is established here for all of them.
+        from run_experiment import isolated_audit_log
+
+        self.enterContext(isolated_audit_log())
         self.ledger = generate(seed=42)
 
     def test_portfolio_metrics_calculation(self) -> None:
         """Verify portfolio totals for book value, naive outstanding, and collectible balance."""
+        from app import audit
         from run_experiment import calculate_portfolio_metrics
+
+        # setUp's isolation must actually be in effect -- without this assertion, deleting
+        # the enterContext line would silently send the whole suite back to folding the
+        # developer's audit/events.jsonl and it would still pass.
+        self.assertIn("recovery-experiment-audit-", str(audit.AUDIT_DIR))
 
         metrics = calculate_portfolio_metrics(self.ledger)
         self.assertEqual(metrics.total_debtors, 20)
@@ -161,14 +175,48 @@ class TestExperimentRunner(unittest.TestCase):
         self.assertTrue(any("reliable" in name or "cooldown" in name for name in case_names), "Reliable Late Payer archetype missing")
         self.assertTrue(any("human" in name or "loss" in name or "review" in name for name in case_names), "Human Review / Loss archetype missing")
 
-        # Every verdict shown must be earned: an authored "Agent Win" claim requires the
-        # agent's strategy to actually differ from baseline's, never a claim about a
-        # strategy the seed's data does not actually show.
+        # Every verdict shown must be earned: the agent's strategy differs from baseline's,
+        # is not "N/A", AND is one of the strategies the shipped case table says this
+        # archetype is about -- checked against the real _DEFAULT_ADJUDICATION_CASES, not
+        # just the injected case in the next test.
+        from run_experiment import _DEFAULT_ADJUDICATION_CASES
+
+        expected_by_id = {c["case_id"]: c["expected_agent_strategies"] for c in _DEFAULT_ADJUDICATION_CASES}
         for item in matrix:
             if item["verdict"].startswith("N/A"):
                 continue
             self.assertNotEqual(item["agent_strategy"], item["baseline_strategy"])
             self.assertNotEqual(item["agent_strategy"], "N/A")
+            self.assertIn(item["agent_strategy"], expected_by_id[item["case_id"]])
+
+    def test_verdict_is_na_when_agent_strategy_does_not_match_the_archetype(self) -> None:
+        """A divergent-but-wrong agent strategy must not inherit the case's authored verdict.
+
+        The baseline escalates the whole book, so "agent != baseline" is true for almost
+        every debtor. The verdict gate must also require the agent to have done the thing
+        the archetype is about.
+        """
+        from run_experiment import build_adjudication_matrix, run_deterministic_agent_batch
+
+        agent_decisions = run_deterministic_agent_batch(self.ledger)
+        baseline_decisions = run_baseline_batch(self.ledger)
+
+        # DEB-004 holds a TDS_UNDERPAID invoice and the agent reconciles it (not WAIT).
+        # RECONCILE diverges from the baseline's ESCALATE, yet a case demanding WAIT here
+        # must still fall to N/A because RECONCILE is not what this archetype demonstrates.
+        mislabelled = [{
+            "case_id": 99,
+            "case_name": "Mislabelled archetype",
+            "debtor_id": "DEB-004",
+            "target_invoice_state": "TDS_UNDERPAID",
+            "expected_agent_strategies": {"WAIT"},
+            "rationale": "authored",
+            "verdict": "Agent Win (must not be shown)",
+        }]
+        matrix = build_adjudication_matrix(
+            agent_decisions, baseline_decisions, self.ledger, cases=mislabelled
+        )
+        self.assertTrue(matrix[0]["verdict"].startswith("N/A"))
 
     def test_adjudication_verdict_is_na_when_case_does_not_reproduce(self) -> None:
         """A debtor missing the case's target invoice state must not show a fabricated win.
