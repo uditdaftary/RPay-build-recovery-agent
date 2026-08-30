@@ -1,8 +1,10 @@
 ﻿import unittest
 from datetime import date
+
 from app.ledger import generate
 from app.operator import set_kill_switch
-from app.pipeline import execute_recovery_pipeline, PipelineRunResult
+from app.pipeline import PipelineRunResult, execute_recovery_pipeline
+
 
 class TestPipelineOrchestration(unittest.TestCase):
     def setUp(self):

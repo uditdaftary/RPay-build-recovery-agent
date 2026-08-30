@@ -1,8 +1,10 @@
 ﻿import unittest
 from datetime import date
-from app.envelope import Channel, Language, Strategy, Tone, ActionClass
+
+from app.envelope import Channel, Language, Strategy, Tone
+from app.messages import draft_message_for_decision, validate_and_sanitize_copy
 from app.strategist import StrategistDecision
-from app.messages import draft_message_for_decision, validate_and_sanitize_copy, DraftedMessage
+
 
 class TestMessageDrafting(unittest.TestCase):
     def setUp(self):

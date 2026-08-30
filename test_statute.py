@@ -350,6 +350,7 @@ class TestStatuteAndDisputes(unittest.TestCase):
 
     def test_dispute_endpoint_integration_and_evidence_requirements(self) -> None:
         from fastapi.testclient import TestClient
+
         from app.config import business_today
         from app.server import INVOICES, app
 

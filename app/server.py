@@ -36,6 +36,14 @@ from app.disputes import (
 )
 from app.ledger import InvoiceState
 from app.ledger import balance_paise as _balance_paise
+from app.operator import (
+    approve_review_item,
+    export_audit_events,
+    get_review_queue,
+    is_kill_switch_active,
+    reject_review_item,
+    set_kill_switch,
+)
 
 DISPUTE_EVIDENCE_MAP: dict[DisputeCategory, str] = {
     DisputeCategory.GOODS_SERVICES: "Inspection Report / Lorry Receipt (LR) Copy / Damage Photos",
@@ -631,15 +639,6 @@ def raise_dispute(body: DisputeRequest) -> JSONResponse:
 # ---------------------------------------------------------------------------
 # Operator Console: Review-First Mode, Kill Switch & Audit Exporter
 # ---------------------------------------------------------------------------
-
-from app.operator import (
-    approve_review_item,
-    export_audit_events,
-    get_review_queue,
-    is_kill_switch_active,
-    reject_review_item,
-    set_kill_switch,
-)
 
 
 class KillSwitchRequest(BaseModel):

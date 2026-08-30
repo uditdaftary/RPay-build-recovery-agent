@@ -1,8 +1,9 @@
 ﻿import unittest
-from pathlib import Path
+
+from app.channels import dispatch_message
 from app.envelope import Channel, Language, Tone
 from app.messages import DraftedMessage
-from app.channels import dispatch_message, DispatchResult
+
 
 class TestChannels(unittest.TestCase):
     def test_mock_email_dispatch_creates_outbox_file_and_audit(self):

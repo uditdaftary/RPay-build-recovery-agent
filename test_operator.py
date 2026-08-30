@@ -1,9 +1,12 @@
 ﻿import unittest
+
 from fastapi.testclient import TestClient
-from app.server import app
-from app.operator import set_kill_switch, is_kill_switch_active, queue_for_review, get_review_queue
+
 from app.envelope import Channel, Language, Tone
 from app.messages import DraftedMessage
+from app.operator import get_review_queue, is_kill_switch_active, queue_for_review, set_kill_switch
+from app.server import app
+
 
 class TestOperatorSurface(unittest.TestCase):
     def setUp(self):

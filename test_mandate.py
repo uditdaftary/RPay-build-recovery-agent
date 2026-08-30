@@ -1,6 +1,8 @@
 ﻿import unittest
-from datetime import date, timedelta
+from datetime import date
+
 from app.mandate import MandateFailureCode, plan_mandate_retries
+
 
 class TestMandateRetry(unittest.TestCase):
     def test_insufficient_funds_exponential_backoff_cadence(self):

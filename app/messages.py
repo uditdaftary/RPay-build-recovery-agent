@@ -1,4 +1,4 @@
-﻿"""Outbound message drafting engine and anti-dark-pattern guardrails.
+"""Outbound message drafting engine and anti-dark-pattern guardrails.
 
 Stage 3 of the recovery pipeline: Converts StrategistDecision into calibrated,
 statute-compliant, anti-dark-pattern verified communications across Email and WhatsApp.
@@ -12,9 +12,7 @@ from typing import Any
 
 from app import audit
 from app.envelope import Channel, Language, Strategy, Tone
-from app.ledger import format_inr
 from app.statute import (
-    PROHIBITED_COPY_PATTERNS,
     calculate_section_16_interest,
     evaluate_section_43b_h,
     validate_section_43b_h_copy,
@@ -105,7 +103,6 @@ def draft_message_for_decision(
 
     if decision.strategy == Strategy.RECONCILE:
         has_tds = any(i.get("state") == "TDS_UNDERPAID" for i in invoices)
-        has_off_rail = any(i.get("state") == "PAID_OFF_RAIL" for i in invoices)
 
         if has_tds:
             if is_hinglish:

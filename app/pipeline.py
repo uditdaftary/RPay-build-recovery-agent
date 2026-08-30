@@ -16,10 +16,9 @@ from typing import Any
 
 from app import audit
 from app.channels import dispatch_message
-from app.envelope import ActionClass, Channel, Strategy
+from app.envelope import ActionClass, Channel
 from app.messages import draft_message_for_decision
 from app.operator import is_kill_switch_active, queue_for_review
-from app.strategist import run_strategist_batch
 
 logger = logging.getLogger(__name__)
 
