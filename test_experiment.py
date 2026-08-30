@@ -189,6 +189,13 @@ class TestExperimentRunner(unittest.TestCase):
             self.assertNotEqual(item["agent_strategy"], "N/A")
             self.assertIn(item["agent_strategy"], expected_by_id[item["case_id"]])
 
+        # At seed 42 every one of the 8 curated archetypes genuinely reproduces -- including
+        # the four (4, 5, 6, 7) whose state+strategy signature alone would also be satisfied
+        # by the wrong mechanism, so this also exercises mechanism_check on the real cases,
+        # not just the injected ones above.
+        non_na_case_ids = {item["case_id"] for item in matrix if not item["verdict"].startswith("N/A")}
+        self.assertEqual(non_na_case_ids, {1, 2, 3, 4, 5, 6, 7, 8})
+
     def test_verdict_is_na_when_agent_strategy_does_not_match_the_archetype(self) -> None:
         """A divergent-but-wrong agent strategy must not inherit the case's authored verdict.
 
@@ -210,6 +217,39 @@ class TestExperimentRunner(unittest.TestCase):
             "debtor_id": "DEB-004",
             "target_invoice_state": "TDS_UNDERPAID",
             "expected_agent_strategies": {"WAIT"},
+            "rationale": "authored",
+            "verdict": "Agent Win (must not be shown)",
+        }]
+        matrix = build_adjudication_matrix(
+            agent_decisions, baseline_decisions, self.ledger, cases=mislabelled
+        )
+        self.assertTrue(matrix[0]["verdict"].startswith("N/A"))
+
+    def test_verdict_is_na_when_state_and_strategy_match_but_mechanism_does_not(self) -> None:
+        """A right-strategy-wrong-reason decision must not inherit the case's verdict either.
+
+        DEB-017 is a reliable late payer, not an opt-out -- it reaches WAIT via the mock's
+        own is_reliable_late_payer branch, never the opt-out fast path. Case 6's OVERDUE +
+        WAIT gate signature is identical to Case 7's, so before mechanism_check existed this
+        would have shown a fabricated "Zero harassment compliance" win for a debtor who
+        never opted out of anything.
+        """
+        from run_experiment import (
+            _opted_out_mechanism,
+            build_adjudication_matrix,
+            run_deterministic_agent_batch,
+        )
+
+        agent_decisions = run_deterministic_agent_batch(self.ledger)
+        baseline_decisions = run_baseline_batch(self.ledger)
+
+        mislabelled = [{
+            "case_id": 98,
+            "case_name": "Mislabelled mechanism",
+            "debtor_id": "DEB-017",
+            "target_invoice_state": "OVERDUE",
+            "expected_agent_strategies": {"WAIT"},
+            "mechanism_check": _opted_out_mechanism,
             "rationale": "authored",
             "verdict": "Agent Win (must not be shown)",
         }]

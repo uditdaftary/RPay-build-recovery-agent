@@ -24,7 +24,7 @@ from typing import Any
 
 from app import audit, llm
 from app.baseline import BaselineDecision, run_baseline_batch
-from app.envelope import Channel, Strategy
+from app.envelope import Channel, Strategy, evaluate_envelope
 from app.ledger import (
     AS_OF,
     format_inr,
@@ -146,6 +146,19 @@ def _promises_kept_ratio(debtor_profile: dict) -> tuple[int, int]:
     return (int(match.group(1)), int(match.group(2))) if match else (0, 0)
 
 
+def _is_reliable_late_payer(debtor_profile: dict) -> bool:
+    """Pays late often enough to have a track record, but keeps at least 4 of 5 promises.
+
+    Takes the prompt-shaped profile (`promises_kept` as the "N of M" string the strategist
+    formats into the prompt), not the raw ledger debtor dict -- `_reliable_late_payer_mechanism`
+    below reformats the ledger's separate `promises_kept`/`promises_made` ints into this same
+    shape before calling in, so both callers share one 0.8-kept-ratio threshold.
+    """
+    kept, made = _promises_kept_ratio(debtor_profile)
+    avg_days_late = debtor_profile.get("avg_days_late", 0) or 0
+    return made >= 4 and avg_days_late > 0 and (kept / made) >= 0.8
+
+
 def _envelope_excludes_for(envelope: dict, strategy: str, keyword: str) -> bool:
     """Whether the real envelope's own exclusion reason for `strategy` mentions `keyword`.
 
@@ -238,12 +251,8 @@ def _deterministic_mock_llm(prompt: str, **kwargs: Any) -> str:
         })
 
     # 3. Reliable Late Payer (WAIT restraint). Same threshold as
-    # test_decisions.py::live_wait_restraint_check: pays late often enough to have a
-    # track record, but keeps at least 4 of 5 promises.
-    kept, made = _promises_kept_ratio(debtor_profile)
-    avg_days_late = debtor_profile.get("avg_days_late", 0) or 0
-    is_reliable_late_payer = made >= 4 and avg_days_late > 0 and (kept / made) >= 0.8
-    if "WAIT" in permitted and is_reliable_late_payer:
+    # test_decisions.py::live_wait_restraint_check.
+    if "WAIT" in permitted and _is_reliable_late_payer(debtor_profile):
         return json.dumps({
             "strategy": "WAIT",
             "channel": "none",
@@ -453,18 +462,76 @@ def calculate_comparative_metrics(
     }
 
 
+# Case-specific ground-truth checks. `target_invoice_state` + `expected_agent_strategies`
+# together prove the agent picked an allowed strategy on a debtor in the right invoice
+# state -- but for four archetypes that combination is also satisfied by a structurally
+# different debtor for a structurally different reason:
+#   - Case 4 (trader): REQUEST_PAYMENT/OBTAIN_PROMISE on an OVERDUE invoice is also just the
+#     mock's generic fallback for any ordinary overdue debtor, trader or not.
+#   - Case 5 (VIP): RECONCILE on a TDS_UNDERPAID invoice is identical in shape to Cases 1/2,
+#     which have nothing to do with VIP exposure protection.
+#   - Cases 6 (opt-out) and 7 (reliable late payer) have the IDENTICAL gate signature
+#     (target_invoice_state="OVERDUE", expected={"WAIT"}) for two different mechanisms:
+#     opt-out suppression bypasses the mock entirely (decide_for_debtor's fast path in
+#     app/strategist.py), while restraint is the mock's own is_reliable_late_payer branch.
+# Each check below verifies the actual differentiating fact from the ledger/envelope,
+# reusing the same real functions the strategist and mock rely on, rather than re-deriving
+# a parallel signal. `build_adjudication_matrix` ANDs the relevant one into `case_applies`.
+
+
+def _trader_ineligible_mechanism(
+    debtor: dict[str, Any], invoices: list[dict[str, Any]], merchant: dict[str, Any] | None, envelope: Any
+) -> bool:
+    """Case 4: statutory escalation must be genuinely unavailable, not just any overdue debtor."""
+    return envelope is not None and not envelope.is_msme_eligible
+
+
+def _vip_protection_mechanism(
+    debtor: dict[str, Any], invoices: list[dict[str, Any]], merchant: dict[str, Any] | None, envelope: Any
+) -> bool:
+    """Case 5: the envelope must actually be protecting this account's exposure from ESCALATE."""
+    return envelope is not None and "preserve relationship" in envelope.excluded_reasons.get(
+        Strategy.ESCALATE, ""
+    ).lower()
+
+
+def _opted_out_mechanism(
+    debtor: dict[str, Any], invoices: list[dict[str, Any]], merchant: dict[str, Any] | None, envelope: Any
+) -> bool:
+    """Case 6: WAIT must be opt-out suppression, not restraint on an otherwise-reliable payer."""
+    return bool(debtor.get("opted_out"))
+
+
+def _reliable_late_payer_mechanism(
+    debtor: dict[str, Any], invoices: list[dict[str, Any]], merchant: dict[str, Any] | None, envelope: Any
+) -> bool:
+    """Case 7: WAIT must be genuine promise-keeping restraint, not opt-out wearing this label.
+
+    The raw ledger debtor carries `promises_kept`/`promises_made` as separate ints;
+    `_is_reliable_late_payer` expects the prompt's "N of M" string, so it's reassembled here
+    rather than duplicating the 0.8-ratio threshold a second time.
+    """
+    profile = {
+        "promises_kept": f"{debtor.get('promises_kept', 0)} of {debtor.get('promises_made', 0)}",
+        "avg_days_late": debtor.get("avg_days_late", 0),
+    }
+    return not debtor.get("opted_out") and _is_reliable_late_payer(profile)
+
+
 # The curated adjudication cases. Each names the debtor that illustrates the archetype at
 # seed 42, the invoice state the archetype needs present, and -- crucially -- the strategy
 # (or set of strategies) the agent must actually choose for the authored verdict to be
 # earned. The debtor->archetype mapping is seed-dependent because invoice states and
 # behaviour draws are randomised per debtor at generation time; the case list is not. So a
-# row's verdict is shown only when all three conditions hold at the running seed.
+# row's verdict is shown only when all four conditions hold at the running seed.
 #
 # `expected_agent_strategies` is what stops a divergent-but-wrong decision inheriting the
 # verdict: the baseline escalates the entire book by construction, so "agent differs from
 # baseline" is true for nearly every debtor and proves nothing on its own. The agent has to
 # have done the archetype-specific thing (reconcile the TDS, triage the dispute, hold on the
-# reliable payer) -- not merely have picked something other than ESCALATE.
+# reliable payer) -- not merely have picked something other than ESCALATE. `mechanism_check`
+# (optional; absent means "state + strategy already prove it", true for Cases 1/2/3/8) is
+# what stops that same strategy from being earned for the wrong underlying reason.
 _DEFAULT_ADJUDICATION_CASES: list[dict[str, Any]] = [
     {
         "case_id": 1,
@@ -499,6 +566,7 @@ _DEFAULT_ADJUDICATION_CASES: list[dict[str, Any]] = [
         "debtor_id": "DEB-018",
         "target_invoice_state": "OVERDUE",
         "expected_agent_strategies": {"REQUEST_PAYMENT", "OBTAIN_PROMISE"},
+        "mechanism_check": _trader_ineligible_mechanism,
         "rationale": "Supplier is a registered trader; Agent chases commercially and declines the statutory notice, Baseline cites Section 15/16 regardless.",
         "verdict": "Agent Win (Avoids unlawful statutory threats)",
     },
@@ -512,6 +580,7 @@ _DEFAULT_ADJUDICATION_CASES: list[dict[str, Any]] = [
         # branch, so the divergence the row actually shows is the TDS reconcile. A broad
         # set here would collapse the third gate condition back to "did not escalate".
         "expected_agent_strategies": {"RECONCILE"},
+        "mechanism_check": _vip_protection_mechanism,
         "rationale": "Exposure is under 5% of a Rs 8.4 Cr trailing-12-month account, so the envelope bars escalation; Agent reconciles the TDS component rather than dunning a strategic buyer, Baseline escalates blind to account value.",
         "verdict": "Agent Win (Protects a high-value account the baseline would escalate)",
     },
@@ -521,6 +590,7 @@ _DEFAULT_ADJUDICATION_CASES: list[dict[str, Any]] = [
         "debtor_id": "DEB-008",
         "target_invoice_state": "OVERDUE",
         "expected_agent_strategies": {"WAIT"},
+        "mechanism_check": _opted_out_mechanism,
         "rationale": "Debtor requested opt-out; Agent permanently suppresses contact, Baseline continues spam.",
         "verdict": "Agent Win (Zero harassment compliance)",
     },
@@ -530,6 +600,7 @@ _DEFAULT_ADJUDICATION_CASES: list[dict[str, Any]] = [
         "debtor_id": "DEB-017",
         "target_invoice_state": "OVERDUE",
         "expected_agent_strategies": {"WAIT"},
+        "mechanism_check": _reliable_late_payer_mechanism,
         "rationale": "7 of 7 promises kept, ~5 days average late; Agent exercises WAIT restraint, Baseline sends redundant reminders.",
         "verdict": "Agent Win (Avoids spamming reliable customers)",
     },
@@ -563,6 +634,8 @@ def build_adjudication_matrix(
     invoices_by_debtor: dict[str, list[dict]] = {}
     for inv in ledger["invoices"]:
         invoices_by_debtor.setdefault(inv["debtor_id"], []).append(inv)
+    debtors_by_id = {d["debtor_id"]: d for d in ledger["debtors"]}
+    merchants_by_id = {m["merchant_id"]: m for m in ledger["merchants"]}
 
     matrix_rows: list[dict[str, Any]] = []
     for c in cases:
@@ -572,26 +645,44 @@ def build_adjudication_matrix(
         d_name = a_dec.debtor_name if a_dec else (b_dec.debtor_name if b_dec else d_id)
 
         # The authored verdict is narrative, true only when this debtor's ledger row still
-        # matches the archetype the case demonstrates. Three conditions, all seed-dependent:
-        # the target invoice state is present, the agent diverged from the baseline, and the
-        # agent chose a strategy this archetype is actually about. Drop any one and the
-        # honest output is "does not reproduce", not the authored claim.
+        # matches the archetype the case demonstrates. Four conditions, all seed-dependent:
+        # the target invoice state is present, the agent diverged from the baseline, the
+        # agent chose a strategy this archetype is actually about, AND (where the case
+        # declares one) the real underlying mechanism actually holds -- state + strategy
+        # alone cannot tell an opt-out WAIT from a reliable-late-payer WAIT, or a trader's
+        # REQUEST_PAYMENT from any ordinary overdue debtor's. Drop any one and the honest
+        # output is "does not reproduce", not the authored claim.
         target_state = c["target_invoice_state"]
         expected = c["expected_agent_strategies"]
+        mechanism_check = c.get("mechanism_check")
         d_invoices = invoices_by_debtor.get(d_id, [])
+        d_debtor = debtors_by_id.get(d_id)
+        d_merchant = merchants_by_id.get(d_debtor["merchant_id"]) if d_debtor else None
+
+        # Only computed when a case actually declares a mechanism_check -- Cases 1/2/3/8
+        # need no envelope at all, and Cases 6/7 read debtor fields directly.
+        envelope = None
+        if mechanism_check is not None and d_debtor is not None and d_merchant is not None:
+            envelope = evaluate_envelope(d_debtor, d_invoices, d_merchant)
+        mechanism_holds = mechanism_check is None or (
+            d_debtor is not None and mechanism_check(d_debtor, d_invoices, d_merchant, envelope)
+        )
+
         case_applies = (
             a_dec is not None
             and b_dec is not None
             and any(i.get("state") == target_state for i in d_invoices)
             and a_dec.strategy != b_dec.strategy
             and a_dec.strategy.value in expected
+            and mechanism_holds
         )
         verdict = c["verdict"] if case_applies else "N/A (case does not reproduce at this seed)"
         rationale = c["rationale"] if case_applies else (
             f"Debtor {d_id} does not currently exhibit the {target_state} archetype this "
-            f"case demonstrates, the agent did not diverge from baseline, or the agent's "
-            f"strategy was not one of {sorted(expected)}; re-run at a different --seed to "
-            "see it, or treat this row as inapplicable."
+            f"case demonstrates, the agent did not diverge from baseline, the agent's "
+            f"strategy was not one of {sorted(expected)}, or the underlying mechanism this "
+            "archetype depends on does not actually hold for this debtor; re-run at a "
+            "different --seed to see it, or treat this row as inapplicable."
         )
 
         matrix_rows.append({
