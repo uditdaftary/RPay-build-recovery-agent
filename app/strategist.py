@@ -37,8 +37,7 @@ from app.envelope import (
     Tone,
     evaluate_envelope,
 )
-from app.ledger import AS_OF, InvoiceState, agent_view
-from app.ledger import balance_paise as _balance_paise
+from app.ledger import AS_OF, agent_view, format_inr
 
 
 class RejectedAction(BaseModel):
@@ -87,9 +86,9 @@ Core rules and principles:
 """
 
 
-def _format_inr(paise: int) -> str:
-    rupees = paise // 100
-    return f"Rs {rupees:,}"
+# One formatter for the whole codebase, in app/ledger.py; this module's call sites keep
+# their existing name rather than being rewritten one by one.
+_format_inr = format_inr
 
 
 def _oldest(invoices: list[dict[str, Any]]) -> dict[str, Any] | None:

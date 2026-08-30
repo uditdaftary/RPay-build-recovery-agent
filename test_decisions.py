@@ -1596,6 +1596,59 @@ def live_agent_vs_baseline() -> None:
         )
 
 
+def load_tests(loader, tests, pattern):
+    import unittest
+
+    suite = unittest.TestSuite()
+    test_funcs = [
+        test_envelope_opt_out,
+        test_envelope_disputed_invoice,
+        test_envelope_msmed_trader_refusal,
+        test_envelope_tds_reconciliation,
+        test_envelope_vip_protection,
+        test_envelope_settled_account_blocks_money_asks,
+        test_envelope_unknown_account_value_fails_closed,
+        test_envelope_preserves_multiple_exclusion_grounds,
+        test_agent_view_projection,
+        test_missing_optout_flag_is_refused,
+        test_intercepted_violation_requires_review,
+        test_ask_is_clamped_into_the_authorised_band,
+        test_tds_withheld_cannot_be_demanded_back,
+        test_non_money_strategy_carries_no_ask,
+        test_no_contact_strategy_carries_no_delivery_fields,
+        test_unreachable_model_does_not_end_the_batch,
+        test_bad_rejected_alternative_does_not_void_a_decision,
+        test_unusable_deadline_and_channel_are_refused,
+        test_decision_made_has_one_shape,
+        test_limit_of_zero_evaluates_nobody,
+        test_optout_suppression_needs_no_model,
+        test_envelope_contact_cooldown,
+        test_history_is_bounded_by_as_of,
+        test_history_reads_a_missing_channel_as_silence,
+        test_envelope_max_intensity,
+        test_envelope_active_promise,
+        test_promise_horizon_bounds_the_suppression_window,
+        test_resolution_endpoints_share_one_state_gate,
+        test_envelope_ignores_the_age_of_settled_invoices,
+        test_history_as_of_takes_the_later_clock,
+        test_audit_survives_unicode_line_separators,
+        test_promises_cannot_hold_recovery_off_forever,
+        test_promise_endpoint_answers_instead_of_ignoring,
+        test_baseline_policy,
+        test_baseline_ladder_and_its_collapse,
+    ]
+    for fn in test_funcs:
+        def _make_test(f):
+            def _test_wrapped():
+                with isolated_audit_log():
+                    f()
+            _test_wrapped.__name__ = f.__name__
+            _test_wrapped.__doc__ = f.__doc__
+            return _test_wrapped
+        suite.addTest(unittest.FunctionTestCase(_make_test(fn)))
+    return suite
+
+
 if __name__ == "__main__":
     with isolated_audit_log():
         test_envelope_opt_out()

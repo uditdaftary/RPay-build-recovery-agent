@@ -17,4 +17,6 @@ venv/
 *.sqlite3
 runs/
 audit/*.jsonl
+.worktrees/
+context.md
 .DS_Store
