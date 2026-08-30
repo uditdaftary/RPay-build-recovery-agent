@@ -13,7 +13,10 @@ webhook is what tells the *system*, and it is the only one that arrives when the
 closes the tab mid-redirect. Suppression therefore hangs off the webhook alone.
 """
 
+import json
 import logging
+import os
+import threading
 from datetime import date, timedelta
 
 import razorpay
@@ -26,34 +29,76 @@ from pydantic import BaseModel, Field, field_validator
 from app import audit, config, razorpay_gateway
 from app.config import PROJECT_ROOT, business_today
 from app.contact_history import MAX_PROMISE_WINDOWS_WITHOUT_SETTLEMENT
+from app.ledger import InvoiceState
+from app.ledger import balance_paise as _balance_paise
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="B2B Receivables Recovery Agent")
 templates = Jinja2Templates(directory=str(PROJECT_ROOT / "app" / "templates"))
 
-# ponytail: two hardcoded invoices so the money path is runnable end to end today.
-# Single-worker, single-process only. The seeded ledger replaces this.
-DEMO_INVOICES: dict[str, dict] = {
-    "tok_demo1": {
-        "invoice_id": "INV-4821",
-        "debtor": "Acme Industries Pvt Ltd",
-        "debtor_id": "DEB-001",
-        "supplier": "Nandi Precision Components",
-        "amount_paise": 380000_00,
-        "days_overdue": 18,
-        "status": "OVERDUE",
-    },
-    "tok_demo2": {
-        "invoice_id": "INV-4903",
-        "debtor": "Vertex Distributors",
-        "debtor_id": "DEB-002",
-        "supplier": "Nandi Precision Components",
-        "amount_paise": 47500_00,
-        "days_overdue": 4,
-        "status": "OVERDUE",
-    },
-}
+def _load_invoices() -> dict[str, dict]:
+    """The live payment surface, built from the seeded ledger and keyed by invoice id.
+
+    The token IS the invoice id, so a strategist decision's `/r/{invoice_id}` link resolves
+    with no second table. This is an in-memory view: status, promises and settlements mutate
+    these dicts, never `data/ledger.json`, because the ledger is the experiment's seed and has
+    to stay byte-identical. Single-worker, single-process only, which the demo is.
+
+    `state` is the ledger's seeded classification; `status` is the runtime lifecycle this
+    service moves. A seeded DISPUTED invoice opens with its door already shut; everything else
+    opens chaseable. TDS-underpaid and off-rail invoices carry a zero live balance, which the
+    balance helper and the strategist already read as nothing to collect.
+    """
+    ledger_path = PROJECT_ROOT / "data" / "ledger.json"
+    if not ledger_path.exists():
+        logger.warning("data/ledger.json not found; the resolution surface has no invoices")
+        return {}
+    ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+    debtors = {d["debtor_id"]: d for d in ledger["debtors"]}
+    merchants = {m["merchant_id"]: m for m in ledger["merchants"]}
+    view: dict[str, dict] = {}
+    for inv in ledger["invoices"]:
+        debtor = debtors[inv["debtor_id"]]
+        merchant = merchants[inv["merchant_id"]]
+        view[inv["invoice_id"]] = {
+            "invoice_id": inv["invoice_id"],
+            "debtor": debtor["name"],
+            "debtor_id": inv["debtor_id"],
+            "supplier": merchant["name"],
+            "amount_paise": inv["amount_paise"],
+            "amount_received_paise": inv.get("amount_received_paise", 0),
+            "tds_deducted_paise": inv.get("tds_deducted_paise", 0),
+            "days_overdue": inv["days_overdue"],
+            "status": "DISPUTED" if inv["state"] == str(InvoiceState.DISPUTED) else "OVERDUE",
+        }
+    return view
+
+
+# Every ledger invoice is resolvable by /r/{invoice_id}, so any decision's link works. The
+# index page shows only a curated few, named in DEMO_TOKENS, to keep the demo landing tight.
+INVOICES: dict[str, dict] = _load_invoices()
+
+
+def _demo_tokens() -> list[str]:
+    """The handful of invoices the index page showcases.
+
+    `DEMO_TOKENS` in the environment names them explicitly once the ledger has been eyeballed;
+    absent that, the clearest chase cases stand in — the most overdue invoices with a live
+    balance. A knob, not a hardcode, because which cases tell the story is a human's call.
+    """
+    override = os.getenv("DEMO_TOKENS", "").strip()
+    if override:
+        return [t.strip() for t in override.split(",") if t.strip() in INVOICES]
+    chaseable = [
+        t for t, inv in INVOICES.items()
+        if inv["status"] == "OVERDUE" and _balance_paise(inv) > 0
+    ]
+    chaseable.sort(key=lambda t: INVOICES[t]["days_overdue"], reverse=True)
+    return chaseable[:3]
+
+
+DEMO_TOKENS: list[str] = _demo_tokens()
 
 
 # The debtor-facing bounds. Kept together and above the page that publishes them into the
@@ -136,42 +181,70 @@ def format_inr(paise: int) -> str:
 
 
 def _find_invoice(order_id: str) -> tuple[str, dict] | tuple[None, None]:
-    for token, invoice in DEMO_INVOICES.items():
-        if invoice.get("razorpay_order_id") == order_id:
+    for token, invoice in INVOICES.items():
+        if order_id in invoice.get("razorpay_order_ids", ()):
             return token, invoice
     return None, None
 
 
+# Guards the check-then-append below. Starlette runs sync routes in a threadpool even in
+# one process, so two redeliveries of the same webhook can arrive genuinely concurrently;
+# without this, both could read "not yet processed" before either records it, double
+# crediting one payment.
+_SETTLEMENT_LOCK = threading.Lock()
+
+
 def suppress_on_settlement(token: str, invoice: dict, payment_id: str, amount_paise: int) -> None:
-    """Halt the ladder for a settled invoice.
+    """Apply a capture to an invoice: halt the ladder if it clears, else chase the remainder.
 
-    Idempotent: Razorpay retries webhooks, and a retry must not double-log a recovery or
-    re-open a closed promise.
+    Idempotent on `payment_id`, not on the PAID status alone: Razorpay redelivers webhooks,
+    and a replayed *partial* leaves the status PARTIALLY_PAID, so a status check would let it
+    through and double-count. A fully settled invoice ignores any further capture.
+
+    A partial capture credits what arrived and records the balance still owed, so the
+    strategist's live projection resumes on the remainder rather than the face value. A
+    capture that clears the balance halts the ladder — the Razorpay differentiator: the money
+    lands on the rail the agent controls, so chasing stops here, not on the next sweep.
     """
-    if invoice["status"] == "PAID":
+    with _SETTLEMENT_LOCK:
+        processed = invoice.setdefault("processed_payment_ids", [])
+        if payment_id in processed or invoice["status"] == "PAID":
+            audit.record(
+                "settlement.duplicate_ignored",
+                invoice_id=invoice["invoice_id"],
+                payment_id=payment_id,
+            )
+            return
+        processed.append(payment_id)
+
+        invoice["amount_received_paise"] = invoice.get("amount_received_paise", 0) + amount_paise
+        remaining = _balance_paise(invoice)
+
+        if remaining > 0:
+            invoice["status"] = str(InvoiceState.PARTIALLY_PAID)
+            audit.record(
+                "settlement.partial",
+                invoice_id=invoice["invoice_id"],
+                debtor=invoice["debtor"],
+                debtor_id=invoice["debtor_id"],
+                payment_id=payment_id,
+                amount_paise=amount_paise,
+                remaining_paise=remaining,
+                token=token,
+            )
+            return
+
+        invoice["status"] = "PAID"
         audit.record(
-            "settlement.duplicate_ignored",
+            "settlement.confirmed",
             invoice_id=invoice["invoice_id"],
+            debtor=invoice["debtor"],
+            debtor_id=invoice["debtor_id"],
             payment_id=payment_id,
+            amount_paise=amount_paise,
+            suppressed=["queued_followups", "open_promise", "escalation_ladder"],
+            token=token,
         )
-        return
-
-    invoice["status"] = "PAID"
-    invoice["paid_payment_id"] = payment_id
-    invoice["paid_amount_paise"] = amount_paise
-
-    audit.record(
-        "settlement.confirmed",
-        invoice_id=invoice["invoice_id"],
-        debtor=invoice["debtor"],
-        debtor_id=invoice["debtor_id"],
-        payment_id=payment_id,
-        amount_paise=amount_paise,
-        # The differentiator: settlement lands on the rail the agent controls, so the
-        # ladder stops here rather than on the next scheduled sweep.
-        suppressed=["queued_followups", "open_promise", "escalation_ladder"],
-        token=token,
-    )
 
 
 @app.get("/health")
@@ -188,15 +261,15 @@ def health() -> dict[str, object]:
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request) -> HTMLResponse:
     rows = [
-        {"token": token, "amount_display": format_inr(inv["amount_paise"]), **inv}
-        for token, inv in DEMO_INVOICES.items()
+        {"token": t, "amount_display": format_inr(_balance_paise(INVOICES[t])), **INVOICES[t]}
+        for t in DEMO_TOKENS
     ]
     return templates.TemplateResponse(request, "index.html", {"invoices": rows})
 
 
 @app.get("/r/{token}", response_class=HTMLResponse)
 def resolution_page(request: Request, token: str) -> HTMLResponse:
-    invoice = DEMO_INVOICES.get(token)
+    invoice = INVOICES.get(token)
     if invoice is None:
         return HTMLResponse("<h1>This link is not valid.</h1>", status_code=404)
 
@@ -207,7 +280,9 @@ def resolution_page(request: Request, token: str) -> HTMLResponse:
         {
             "token": token,
             "invoice": invoice,
-            "amount_display": format_inr(invoice["amount_paise"]),
+            # The balance still owed, not the face value: a part-paid invoice shows and
+            # charges the remainder.
+            "amount_display": format_inr(_balance_paise(invoice)),
             "razorpay_key_id": config.RAZORPAY_KEY_ID,
             # The form constrains what the validators already enforce, and the window is
             # computed here rather than in the browser: the validator compares against this
@@ -231,7 +306,7 @@ class CreateOrderRequest(BaseModel):
 
 @app.post("/api/create-order")
 def create_order(body: CreateOrderRequest) -> JSONResponse:
-    invoice = DEMO_INVOICES.get(body.token)
+    invoice = INVOICES.get(body.token)
     if invoice is None:
         return JSONResponse({"error": "unknown token"}, status_code=404)
 
@@ -240,8 +315,20 @@ def create_order(body: CreateOrderRequest) -> JSONResponse:
         return blocked
 
     # `is None`, not truthiness. See the field definition: 0 is an answer, not a silence.
-    amount = invoice["amount_paise"] if body.amount_paise is None else body.amount_paise
-    if amount > invoice["amount_paise"]:
+    # Defaults to and is capped at the balance still owed, not the face value, so a debtor
+    # settling the remainder of a part-paid invoice is neither overcharged nor able to
+    # overpay.
+    balance = _balance_paise(invoice)
+    # A TDS_UNDERPAID or PAID_OFF_RAIL invoice reconciles to a live balance of 0 but is not
+    # blocked by _mutation_blocked (its status is "OVERDUE", not "PAID"), so without this a
+    # zero-balance invoice reached the gateway with amount_paise=0 and surfaced Razorpay's
+    # raw "amount_paise must be >= 100" ValueError to the debtor.
+    if balance <= 0:
+        return JSONResponse(
+            {"error": "there is nothing left to collect on this invoice"}, status_code=400
+        )
+    amount = balance if body.amount_paise is None else body.amount_paise
+    if amount > balance:
         return JSONResponse(
             {"error": "amount exceeds the invoice balance"}, status_code=400
         )
@@ -261,7 +348,7 @@ def create_order(body: CreateOrderRequest) -> JSONResponse:
         audit.record("order.failed", invoice_id=invoice["invoice_id"], error=repr(exc))
         return JSONResponse({"error": "could not reach the payment gateway"}, status_code=502)
 
-    invoice["razorpay_order_id"] = order["id"]
+    invoice.setdefault("razorpay_order_ids", []).append(order["id"])
     audit.record(
         "order.created",
         invoice_id=invoice["invoice_id"],
@@ -373,7 +460,7 @@ class PromiseRequest(BaseModel):
 
 @app.post("/api/promise")
 def record_promise(body: PromiseRequest) -> JSONResponse:
-    invoice = DEMO_INVOICES.get(body.token)
+    invoice = INVOICES.get(body.token)
     if invoice is None:
         return JSONResponse({"error": "unknown token"}, status_code=404)
     blocked = _mutation_blocked(invoice)
@@ -382,7 +469,7 @@ def record_promise(body: PromiseRequest) -> JSONResponse:
     # Bounded against this invoice, not only against the crore ceiling on the field. The
     # figure is folded into DebtorHistory and rendered verbatim into the envelope's own
     # exclusion reasoning, so an unanchored number becomes part of the audit trail.
-    if body.promised_amount_paise is not None and body.promised_amount_paise > invoice["amount_paise"]:
+    if body.promised_amount_paise is not None and body.promised_amount_paise > _balance_paise(invoice):
         return JSONResponse(
             {"error": "promised amount exceeds the invoice balance"}, status_code=400
         )
@@ -414,7 +501,7 @@ def record_promise(body: PromiseRequest) -> JSONResponse:
         # quietly ignored by the fold, which is the humouring this check exists to stop.
         opened = sum(
             other.get("promise_windows", 0)
-            for other in DEMO_INVOICES.values()
+            for other in INVOICES.values()
             if other["debtor_id"] == invoice["debtor_id"]
         )
         if opened >= MAX_PROMISE_WINDOWS_WITHOUT_SETTLEMENT:
@@ -458,7 +545,7 @@ class DisputeRequest(BaseModel):
 
 @app.post("/api/dispute")
 def raise_dispute(body: DisputeRequest) -> JSONResponse:
-    invoice = DEMO_INVOICES.get(body.token)
+    invoice = INVOICES.get(body.token)
     if invoice is None:
         return JSONResponse({"error": "unknown token"}, status_code=404)
     blocked = _mutation_blocked(invoice, allow_disputed=True)

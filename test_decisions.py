@@ -118,6 +118,23 @@ def _invoices_by_debtor(ledger: dict) -> dict[str, list[dict]]:
     return grouped
 
 
+def _plain_overdue_tokens(invoices: dict) -> list[str]:
+    """Tokens for invoices that are overdue with nothing received or deducted yet.
+
+    `INVOICES[token]["status"]` alone is not enough: `_load_invoices` maps TDS_UNDERPAID,
+    PAID_OFF_RAIL and PARTIALLY_PAID to "OVERDUE" too, so a status filter can hand a test an
+    invoice that is already reconciled or part-paid instead of the plain overdue one it
+    means to exercise.
+    """
+    return sorted(
+        t
+        for t, i in invoices.items()
+        if i["status"] == "OVERDUE"
+        and i.get("amount_received_paise", 0) == 0
+        and i.get("tds_deducted_paise", 0) == 0
+    )
+
+
 def test_envelope_opt_out() -> None:
     debtor = {
         "debtor_id": "DEB-TEST",
@@ -552,14 +569,16 @@ def test_resolution_endpoints_share_one_state_gate() -> None:
     """A dispute closes the payment and promise doors, and money asks are bounded."""
     from fastapi.testclient import TestClient
 
-    from app.server import DEMO_INVOICES, app
+    from app.server import INVOICES, app
 
-    token = "tok_demo2"
-    original = dict(DEMO_INVOICES[token])
+    # A real ledger invoice, since the surface is ledger-backed now. Any plain overdue one
+    # exercises the shared state gate; a distinct one from the promise test avoids coupling.
+    token = _plain_overdue_tokens(INVOICES)[0]
+    original = dict(INVOICES[token])
     due = (business_today() + timedelta(days=7)).isoformat()
     try:
         with TestClient(app) as client:
-            invoice_paise = DEMO_INVOICES[token]["amount_paise"]
+            invoice_paise = INVOICES[token]["amount_paise"]
             # 0 is an answer, not a silence: refused, never read as "the whole invoice".
             zero = client.post("/api/create-order", json={"token": token, "amount_paise": 0})
             assert zero.status_code == 422, f"an amount of zero was accepted ({zero.text})"
@@ -581,12 +600,12 @@ def test_resolution_endpoints_share_one_state_gate() -> None:
             # A promise used to rewrite the status to PROMISED and reopen the payment path.
             promised = client.post("/api/promise", json={"token": token, "promised_date": due})
             assert promised.status_code == 400, "a promise was accepted on a disputed invoice"
-            assert DEMO_INVOICES[token]["status"] == "DISPUTED", "the dispute was cleared"
+            assert INVOICES[token]["status"] == "DISPUTED", "the dispute was cleared"
             assert client.post("/api/create-order", json={"token": token}).status_code == 400, (
                 "payment was reopened on a disputed invoice"
             )
     finally:
-        DEMO_INVOICES[token] = original
+        INVOICES[token] = original
     print("ok  the resolution endpoints agree on what state accepts a write")
 
 
@@ -657,10 +676,12 @@ def test_promise_endpoint_answers_instead_of_ignoring() -> None:
     """
     from fastapi.testclient import TestClient
 
-    from app.server import DEMO_INVOICES, app
+    from app.server import INVOICES, app
 
-    token = "tok_demo1"
-    original = dict(DEMO_INVOICES[token])
+    # A distinct ledger invoice from the state-gate test, so the two do not share promise
+    # windows on the same debtor.
+    token = _plain_overdue_tokens(INVOICES)[1]
+    original = dict(INVOICES[token])
     today = business_today()
 
     def promise(days: int):
@@ -678,23 +699,240 @@ def test_promise_endpoint_answers_instead_of_ignoring() -> None:
             assert "earlier" in pushed.json()["error"], pushed.json()
 
             assert promise(3).status_code == 200, "a debtor offering to pay sooner was refused"
-            assert DEMO_INVOICES[token]["promise_windows"] == 1, (
+            assert INVOICES[token]["promise_windows"] == 1, (
                 "bringing a date forward spent a suppression window"
             )
 
             # Let the date pass without paying, twice, and the budget runs out.
-            DEMO_INVOICES[token]["promised_date"] = (today - timedelta(days=1)).isoformat()
+            INVOICES[token]["promised_date"] = (today - timedelta(days=1)).isoformat()
             assert promise(10).status_code == 200, "a second window was refused"
 
-            DEMO_INVOICES[token]["promised_date"] = (today - timedelta(days=1)).isoformat()
+            INVOICES[token]["promised_date"] = (today - timedelta(days=1)).isoformat()
             spent = promise(10)
             assert spent.status_code == 400, (
                 "recovery could be suppressed for another window with no payment"
             )
             assert "person" in spent.json()["error"], spent.json()
     finally:
-        DEMO_INVOICES[token] = original
+        INVOICES[token] = original
     print("ok  the promise endpoint refuses what the fold would ignore")
+
+
+def test_live_invoice_state_projects_settlement() -> None:
+    """Settlement folded from the audit log reduces what the envelope treats as collectible.
+
+    A full payment drops the invoice to PAID (nothing left collectible); a partial leaves
+    the remainder as PARTIALLY_PAID so the ladder continues on it. The input dicts are never
+    mutated, because they come straight off data/ledger.json and the seed must stay
+    byte-identical.
+    """
+    from app.contact_history import live_invoice_state
+
+    invoices = [
+        {"invoice_id": "INV-A", "amount_paise": 300_000_00, "amount_received_paise": 0,
+         "days_overdue": 40, "state": "OVERDUE"},
+        {"invoice_id": "INV-B", "amount_paise": 100_000_00, "amount_received_paise": 0,
+         "days_overdue": 10, "state": "OVERDUE"},
+    ]
+    as_of = date(2026, 8, 30)
+    events = [
+        {"ts": "2026-08-29T09:00:00+00:00", "event": "settlement.confirmed",
+         "invoice_id": "INV-A", "payment_id": "pay_1", "amount_paise": 300_000_00},
+        {"ts": "2026-08-29T10:00:00+00:00", "event": "settlement.partial",
+         "invoice_id": "INV-B", "payment_id": "pay_2", "amount_paise": 40_000_00},
+    ]
+
+    by_id = {i["invoice_id"]: i for i in live_invoice_state(invoices, events, as_of)}
+    assert by_id["INV-A"]["amount_received_paise"] == 300_000_00
+    assert by_id["INV-A"]["state"] == str(InvoiceState.PAID), "full payment left something collectible"
+    assert by_id["INV-B"]["amount_received_paise"] == 40_000_00
+    assert by_id["INV-B"]["state"] == str(InvoiceState.PARTIALLY_PAID), "partial did not leave a remainder"
+
+    # The seed is untouched: the caller's dicts must not have been mutated in place.
+    assert invoices[0]["amount_received_paise"] == 0 and invoices[0]["state"] == "OVERDUE"
+
+    # Redelivery is idempotent: Razorpay retries webhooks, and the PAID short-circuit does
+    # not catch a replayed *partial*, so dedup is on payment_id.
+    replayed = events + [dict(events[1])]
+    again = {i["invoice_id"]: i for i in live_invoice_state(invoices, replayed, as_of)}
+    assert again["INV-B"]["amount_received_paise"] == 40_000_00, "a redelivered partial was double-counted"
+
+    # A settlement stamped after the fold date must not apply to a run pinned before it.
+    future = [{"ts": "2026-12-01T09:00:00+00:00", "event": "settlement.confirmed",
+               "invoice_id": "INV-B", "payment_id": "pay_3", "amount_paise": 60_000_00}]
+    later = {i["invoice_id"]: i for i in live_invoice_state(invoices, events + future, as_of)}
+    assert later["INV-B"]["amount_received_paise"] == 40_000_00, "a settlement after as_of applied early"
+    print("ok  live invoice state projects settlement, dedupes on payment id, respects the cutoff")
+
+
+def test_resolution_surface_is_ledger_backed() -> None:
+    """The payment surface serves real ledger invoices, keyed by invoice id, and never writes
+    the seed back to disk.
+
+    Before this the surface ran on two hardcoded invoices decoupled from the ledger, so the
+    Aug 28 gate's "overdue -> decision -> link -> paid -> ladder halts" could not run on a
+    ledger debtor. Token == invoice id, so a strategist's `/r/{invoice_id}` link resolves with
+    no second table. data/ledger.json is the experiment's seed and must stay byte-identical, so
+    a settlement moves the in-memory view only.
+    """
+    from fastapi.testclient import TestClient
+
+    from app.ledger import LEDGER_PATH
+    from app.server import INVOICES, app, suppress_on_settlement
+
+    ledger_ids = {i["invoice_id"] for i in _load_ledger()["invoices"]}
+    assert INVOICES, "the resolution surface has no invoices; is data/ledger.json present?"
+    assert set(INVOICES) <= ledger_ids, "the surface served an invoice the ledger does not contain"
+
+    token = sorted(t for t, i in INVOICES.items() if i["status"] == "OVERDUE")[0]
+    assert INVOICES[token]["invoice_id"] == token, "token is not the invoice id, so links will not resolve"
+
+    original = dict(INVOICES[token])
+    before = LEDGER_PATH.read_text(encoding="utf-8")
+    try:
+        with isolated_audit_log():
+            with TestClient(app) as client:
+                page = client.get(f"/r/{token}")
+                assert page.status_code == 200 and INVOICES[token]["debtor"] in page.text, page.status_code
+            suppress_on_settlement(token, INVOICES[token], "pay_seed", INVOICES[token]["amount_paise"])
+            assert INVOICES[token]["status"] == "PAID", "settlement did not update the in-memory view"
+        assert LEDGER_PATH.read_text(encoding="utf-8") == before, (
+            "a settlement wrote back to data/ledger.json; the seed must stay byte-identical"
+        )
+    finally:
+        INVOICES[token] = original
+    print("ok  the resolution surface is ledger-backed and leaves the seed on disk untouched")
+
+
+def test_partial_capture_leaves_the_remainder() -> None:
+    """A partial payment settles part of an invoice; the ladder continues on what is left.
+
+    A full capture marks the invoice PAID and halts. A partial marks it PARTIALLY_PAID and
+    records the remaining balance, so the strategist's live projection chases only the
+    remainder. Redelivery is idempotent on payment id, which the status check alone missed
+    for partials: a replayed partial does not change PAID, so it would have been counted twice.
+    """
+    from app.server import suppress_on_settlement
+
+    def fresh() -> dict:
+        return {"invoice_id": "INV-PC", "debtor": "Part Payer Ltd", "debtor_id": "DEB-PC",
+                "amount_paise": 300_000_00, "amount_received_paise": 0, "status": "OVERDUE"}
+
+    with isolated_audit_log():
+        invoice = fresh()
+        suppress_on_settlement("tok", invoice, "pay_1", 100_000_00)
+        assert invoice["status"] == str(InvoiceState.PARTIALLY_PAID), "a partial capture did not leave a remainder"
+        assert invoice["amount_received_paise"] == 100_000_00
+
+        # Redelivered partial: same payment id, must not double-count.
+        suppress_on_settlement("tok", invoice, "pay_1", 100_000_00)
+        assert invoice["amount_received_paise"] == 100_000_00, "a redelivered partial was counted twice"
+
+        # A second, distinct payment clears the balance and halts the ladder.
+        suppress_on_settlement("tok", invoice, "pay_2", 200_000_00)
+        assert invoice["status"] == "PAID", "the invoice did not settle once fully paid"
+
+        events = audit.read_all()
+        names = [e["event"] for e in events]
+        assert names.count("settlement.partial") == 1, names
+        assert names.count("settlement.confirmed") == 1, names
+        assert names.count("settlement.duplicate_ignored") == 1, names
+        partial = next(e for e in events if e["event"] == "settlement.partial")
+        assert partial["remaining_paise"] == 200_000_00, partial
+    print("ok  a partial capture leaves the remainder chaseable and is idempotent on payment id")
+
+
+def test_contact_decision_carries_a_resolution_link() -> None:
+    """A decision that reaches the debtor links to the resolution page for the driving invoice.
+
+    The link is the single payment surface every outbound message points at. It names the
+    oldest still-collectible invoice — the one the s.15 clock runs from — and the token is
+    the invoice id, so the server resolves it with no second lookup table. A decision that
+    contacts nobody (opt-out, WAIT) carries no link.
+    """
+    from app.config import PUBLIC_BASE_URL
+
+    debtor = {"debtor_id": "DEB-LINK", "name": "Linkable Ltd", "opted_out": False,
+              "language": "en", "trailing_12m_value_paise": 900_000_00,
+              "behaviour": {"pay_propensity": 0.5}}
+    invoices = [
+        {"invoice_id": "INV-NEW", "amount_paise": 100_000_00, "days_overdue": 10, "state": "OVERDUE"},
+        {"invoice_id": "INV-OLD", "amount_paise": 200_000_00, "days_overdue": 40, "state": "OVERDUE"},
+    ]
+    merchant = {"merchant_id": "MER-001", "name": "Nandi Precision Components",
+                "udyam_registered": True, "udyam_category": "small", "udyam_activity": "manufacturing"}
+    payload = json.dumps({
+        "strategy": "REQUEST_PAYMENT", "channel": "email", "language": "en", "tone": "firm",
+        "ask_amount_paise": 300_000_00, "reasoning": "overdue", "confidence": 0.9,
+        "rejected_actions": [{"strategy": "WAIT", "reason": "past due"}],
+    })
+    with stub_llm(payload):
+        decision = decide_for_debtor(debtor, invoices, merchant, history=NO_HISTORY)
+    assert decision.channel == Channel.EMAIL
+    assert decision.resolution_url == f"{PUBLIC_BASE_URL}/r/INV-OLD", (
+        f"link did not point at the oldest collectible invoice: {decision.resolution_url}"
+    )
+
+    # A decision that reaches nobody has nothing to link. The opt-out debtor is the fast path.
+    opted_out = {**debtor, "debtor_id": "DEB-OUT", "opted_out": True}
+    with forbid_llm("opt-out must not reach the model"):
+        suppressed = decide_for_debtor(opted_out, invoices, merchant, history=NO_HISTORY)
+    assert suppressed.channel == Channel.NONE and suppressed.resolution_url is None, (
+        "a suppressed decision carried a payment link"
+    )
+    print("ok  a contact decision carries the resolution link, a suppressed one does not")
+
+
+def test_run_strategist_batch_live_state_halts_only_when_asked() -> None:
+    """`live_state` folds settlement into collectible; without it the batch stays seed-pure.
+
+    The default MUST ignore the audit log's settlements, or the Aug 30 uplift number stops
+    being a function of the seed (openitems.md 2). With it on, a settled invoice drops to
+    zero collectible, so the money ask the model returned is intercepted and sent for review.
+    """
+    ledger = {
+        "as_of": "2026-08-26",
+        "merchants": [{"merchant_id": "MER-001", "name": "Nandi Precision Components",
+                       "udyam_registered": True, "udyam_category": "small",
+                       "udyam_activity": "manufacturing"}],
+        "debtors": [{"debtor_id": "DEB-LIVE", "name": "Live Wire Ltd", "merchant_id": "MER-001",
+                     "opted_out": False, "language": "en", "trailing_12m_value_paise": 900_000_00,
+                     "behaviour": {"pay_propensity": 0.5}}],
+        "invoices": [{"invoice_id": "INV-LIVE", "debtor_id": "DEB-LIVE", "merchant_id": "MER-001",
+                      "amount_paise": 500_000_00, "amount_received_paise": 0, "days_overdue": 60,
+                      "state": "OVERDUE"}],
+    }
+    payload = json.dumps({
+        "strategy": "REQUEST_PAYMENT", "channel": "email", "language": "en", "tone": "firm",
+        "ask_amount_paise": 500_000_00, "reasoning": "60 days overdue, please pay.",
+        "rejected_actions": [{"strategy": "WAIT", "reason": "well past due"}], "confidence": 0.9,
+    })
+
+    def settle() -> None:
+        audit.record("settlement.confirmed", invoice_id="INV-LIVE", debtor_id="DEB-LIVE",
+                     payment_id="pay_live", amount_paise=500_000_00)
+
+    # A fresh log per run: each batch writes its own `decision.made`, so re-running against
+    # the same log would fold that as prior contact and trip the cooldown, masking the thing
+    # under test.
+    with isolated_audit_log(), stub_llm(payload):
+        seed_pure = run_strategist_batch(ledger, limit=1)[0]
+    assert seed_pure.strategy == Strategy.REQUEST_PAYMENT, "the seeded batch did not chase an overdue invoice"
+    assert not seed_pure.review_required, "an in-band ask on a seeded invoice was flagged for review"
+
+    with isolated_audit_log(), stub_llm(payload):
+        settle()
+        default_with_settlement = run_strategist_batch(ledger, limit=1)[0]
+    assert default_with_settlement.strategy == Strategy.REQUEST_PAYMENT, (
+        "the default batch saw a wall-clock settlement; it must stay a function of the seed"
+    )
+
+    with isolated_audit_log(), stub_llm(payload):
+        settle()
+        live = run_strategist_batch(ledger, limit=1, live_state=True)[0]
+    assert live.strategy != Strategy.REQUEST_PAYMENT, "the ladder did not halt on a settled invoice"
+    assert live.review_required, "an intercepted money ask on a settled invoice was not flagged"
+    print("ok  run_strategist_batch halts the ladder only when live_state is on")
 
 
 def test_baseline_policy() -> None:
@@ -1446,6 +1684,11 @@ if __name__ == "__main__":
         test_audit_survives_unicode_line_separators()
         test_promises_cannot_hold_recovery_off_forever()
         test_promise_endpoint_answers_instead_of_ignoring()
+        test_live_invoice_state_projects_settlement()
+        test_resolution_surface_is_ledger_backed()
+        test_partial_capture_leaves_the_remainder()
+        test_contact_decision_carries_a_resolution_link()
+        test_run_strategist_batch_live_state_halts_only_when_asked()
         test_baseline_policy()
         test_baseline_ladder_and_its_collapse()
         print("\nall decision tests passed")

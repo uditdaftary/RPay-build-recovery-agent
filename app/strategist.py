@@ -23,6 +23,7 @@ from typing import Any
 from pydantic import BaseModel, Field, ValidationError
 
 from app import audit, contact_history, llm
+from app.config import PUBLIC_BASE_URL
 from app.envelope import (
     ASKS_FOR_MONEY,
     NO_CONTACT_STRATEGIES,
@@ -60,6 +61,10 @@ class StrategistDecision(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     review_required: bool = False
     action_class: ActionClass = ActionClass.AUTOMATABLE
+    # The resolution page (pay / promise / dispute) for the invoice this decision drives.
+    # Attached only when the decision actually reaches the debtor; a WAIT or a handoff has
+    # nobody to send it to. The strategist sets it, the model never sees it.
+    resolution_url: str | None = None
 
 
 SYSTEM_PROMPT = """You are an expert B2B Receivables Recovery Strategist for Indian MSMEs.
@@ -84,6 +89,44 @@ Core rules and principles:
 # One formatter for the whole codebase, in app/ledger.py; this module's call sites keep
 # their existing name rather than being rewritten one by one.
 _format_inr = format_inr
+
+
+def _oldest(invoices: list[dict[str, Any]]) -> dict[str, Any] | None:
+    return max(invoices, key=lambda inv: inv.get("days_overdue", 0), default=None)
+
+
+def _resolution_url(invoices: list[dict[str, Any]], strategy: Strategy) -> str | None:
+    """The resolution link for the invoice a contact decision is really about.
+
+    A RESOLVE_DISPUTE or RECONCILE decision is about a specific invoice state, not "whatever
+    is oldest" — linking a dispute email to some other, undisputed invoice sends the debtor
+    to a page with no dispute context at all. So the invoice the message concerns takes
+    priority when the strategy names one; otherwise this falls back to the oldest invoice
+    with something still collectible, which is the one nearest the s.15 statutory clock and
+    the one worth putting in front of the debtor first. The token is the invoice id, so
+    `/r/{invoice_id}` needs no separate token table. Nothing to point at means no link.
+    """
+    if strategy == Strategy.RESOLVE_DISPUTE:
+        disputed = [inv for inv in invoices if inv.get("state") == InvoiceState.DISPUTED]
+        primary = _oldest(disputed)
+        if primary is not None:
+            return f"{PUBLIC_BASE_URL}/r/{primary['invoice_id']}"
+
+    if strategy == Strategy.RECONCILE:
+        reconcilable = [
+            inv
+            for inv in invoices
+            if inv.get("state") in (InvoiceState.TDS_UNDERPAID, InvoiceState.PAID_OFF_RAIL)
+        ]
+        primary = _oldest(reconcilable)
+        if primary is not None:
+            return f"{PUBLIC_BASE_URL}/r/{primary['invoice_id']}"
+
+    collectible = [inv for inv in invoices if _balance_paise(inv) > 0]
+    primary = _oldest(collectible)
+    if primary is None:
+        return None
+    return f"{PUBLIC_BASE_URL}/r/{primary['invoice_id']}"
 
 
 def _safe_fallback(envelope: EnvelopeResult) -> Strategy:
@@ -164,6 +207,9 @@ def _record_decision(decision: StrategistDecision) -> None:
         deadline_requested=decision.deadline_requested,
         reasoning=decision.reasoning,
         rejected_actions=[r.model_dump() for r in decision.rejected_actions],
+        # The payment surface this decision points the debtor at, so the audit trail carries
+        # the link that was actually sent rather than one reconstructed later.
+        resolution_url=decision.resolution_url,
     )
 
 
@@ -491,15 +537,27 @@ Return your structured decision according to the schema. Ensure strategy is one 
         decision.review_required or decision.action_class == ActionClass.REVIEW_REQUIRED
     )
 
+    # Attach the payment surface only once the strategy is final: an intercepted money ask has
+    # by now been forced to a no-contact fallback, so this reads the settled channel, not the
+    # one the model asked for.
+    if decision.channel != Channel.NONE:
+        decision.resolution_url = _resolution_url(invoices, decision.strategy)
+
     _record_decision(decision)
 
     return decision
 
 
 def run_strategist_batch(
-    ledger: dict[str, Any], *, limit: int | None = None
+    ledger: dict[str, Any], *, limit: int | None = None, live_state: bool = False
 ) -> list[StrategistDecision]:
-    """Run AI recovery strategist over debtors in the ledger."""
+    """Run AI recovery strategist over debtors in the ledger.
+
+    `live_state` is off by default so a batch is a pure function of its seed, which the
+    experiment depends on. Turned on, settlements recorded in the audit log are folded into
+    each invoice's balance (`contact_history.live_invoice_state`), so a paid invoice stops
+    driving money asks and the ladder halts — the demo path, never the measurement one.
+    """
     merchants_by_id = {m["merchant_id"]: m for m in ledger["merchants"]}
     invoices_by_debtor: dict[str, list[dict]] = {}
     for inv in ledger["invoices"]:
@@ -514,12 +572,26 @@ def run_strategist_batch(
     # Folded once for the whole batch rather than re-read per debtor. The fold date is not
     # the ledger's: invoice ageing stays pinned, but promises and settlements arrive on the
     # wall clock and are discarded by the fold's own cutoff if it sits in the past.
-    histories = contact_history.build(
-        contact_history.history_as_of(date.fromisoformat(as_of_date))
-    )
+    fold_date = contact_history.history_as_of(date.fromisoformat(as_of_date))
+    # Read once and reuse for both folds when live: the same events drive the history and the
+    # invoice-balance projection, so reading the log twice would only invite them to disagree.
+    events = audit.read_all() if live_state else None
+    histories = contact_history.build(fold_date, events)
+
+    # Projected once for the whole ledger, not once per debtor: live_invoice_state rescans
+    # the full events list on every call, so calling it inside the debtor loop turned an
+    # O(events) fold into O(debtors x events) on every live-state batch.
+    live_invoices_by_id: dict[str, dict] | None = None
+    if live_state:
+        live_invoices_by_id = {
+            inv["invoice_id"]: inv
+            for inv in contact_history.live_invoice_state(ledger["invoices"], events, fold_date)
+        }
 
     for debtor in debtors:
         d_invoices = invoices_by_debtor.get(debtor["debtor_id"], [])
+        if live_invoices_by_id is not None and d_invoices:
+            d_invoices = [live_invoices_by_id[inv["invoice_id"]] for inv in d_invoices]
         if d_invoices:
             # Fail loud, but only where the merchant actually matters. Defaulting to the
             # first merchant would silently hand the debtor whichever statutory eligibility
