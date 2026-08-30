@@ -10,6 +10,7 @@ Verifies:
 
 from __future__ import annotations
 
+import copy
 import unittest
 from datetime import date, timedelta
 from decimal import Decimal
@@ -20,6 +21,7 @@ from app.disputes import (
     recompute_statutory_dates_on_dispute,
 )
 from app.ledger import Merchant, UdyamActivity
+from app.server import INVOICES
 from app.statute import (
     DEFAULT_RBI_BANK_RATE_PCT,
     STATUTORY_RATE_MULTIPLIER,
@@ -35,6 +37,13 @@ from app.statute import (
 
 
 class TestStatuteAndDisputes(unittest.TestCase):
+    def setUp(self) -> None:
+        self._invoices_backup = copy.deepcopy(INVOICES)
+
+    def tearDown(self) -> None:
+        INVOICES.clear()
+        INVOICES.update(self._invoices_backup)
+
     def test_statutory_dates_no_written_agreement(self) -> None:
         """Without a written agreement, payment is due within 15 calendar days from delivery."""
         delivery = date(2026, 8, 1)
@@ -380,8 +389,112 @@ class TestStatuteAndDisputes(unittest.TestCase):
         data_late = res_late.json()
         self.assertFalse(data_late["statutory_clock_suspended"])
 
+    def test_dispute_endpoint_fallback_delivery_heuristics(self) -> None:
+        """Verify fallback delivery date heuristics when delivery_date is missing."""
+        from fastapi.testclient import TestClient
+
+        from app.config import business_today
+        from app.server import INVOICES, app
+
+        client = TestClient(app)
+        test_token = next(iter(INVOICES.keys()))
+
+        # 1. Fallback to invoice_date (within 15 days) -> clock suspended
+        INVOICES[test_token]["delivery_date"] = None
+        INVOICES[test_token]["invoice_date"] = (business_today() - timedelta(days=5)).isoformat()
+        INVOICES[test_token]["contractual_due_date"] = (business_today() + timedelta(days=25)).isoformat()
+        INVOICES[test_token]["status"] = "OVERDUE"
+        res = client.post(
+            "/api/dispute",
+            json={"token": test_token, "reason": "Rate on the invoice does not match PO"},
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.json()["statutory_clock_suspended"])
+
+        # 2. Fallback to contractual_due_date with written_agreement=False (15d window)
+        INVOICES[test_token]["delivery_date"] = None
+        INVOICES[test_token]["invoice_date"] = None
+        # contractual_due_date is in 5 days -> delivery_d = 5d - 15d = -10d (10 days ago, inside 15d)
+        INVOICES[test_token]["contractual_due_date"] = (business_today() + timedelta(days=5)).isoformat()
+        INVOICES[test_token]["written_agreement"] = False
+        INVOICES[test_token]["status"] = "OVERDUE"
+        res_15d = client.post(
+            "/api/dispute",
+            json={"token": test_token, "reason": "Short delivery, 10 units missing"},
+        )
+        self.assertEqual(res_15d.status_code, 200)
+        self.assertTrue(res_15d.json()["statutory_clock_suspended"])
+
+        # 3. Fallback to days_overdue (default 15 days) -> delivery_d = business_today() - 5d (inside 15d)
+        INVOICES[test_token]["delivery_date"] = None
+        INVOICES[test_token]["invoice_date"] = None
+        INVOICES[test_token]["contractual_due_date"] = None
+        INVOICES[test_token]["days_overdue"] = 5
+        INVOICES[test_token]["status"] = "OVERDUE"
+        res_overdue = client.post(
+            "/api/dispute",
+            json={"token": test_token, "reason": "Duplicate invoice INV-999"},
+        )
+        self.assertEqual(res_overdue.status_code, 200)
+        self.assertTrue(res_overdue.json()["statutory_clock_suspended"])
+
+        # 4. Null days_overdue fallback does not crash (defaults to 15 days)
+        INVOICES[test_token]["delivery_date"] = None
+        INVOICES[test_token]["invoice_date"] = None
+        INVOICES[test_token]["contractual_due_date"] = None
+        INVOICES[test_token]["days_overdue"] = None
+        INVOICES[test_token]["status"] = "OVERDUE"
+        res_null_days = client.post(
+            "/api/dispute",
+            json={"token": test_token, "reason": "Pricing dispute on null overdue invoice"},
+        )
+        self.assertEqual(res_null_days.status_code, 200)
+        self.assertTrue(res_null_days.json()["statutory_clock_suspended"])
+
+    def test_mandate_webhook_simulate_endpoint(self) -> None:
+        """Verify POST /api/mandate/simulate-webhook endpoint."""
+        from fastapi.testclient import TestClient
+
+        from app.server import app
+
+        client = TestClient(app)
+
+        # Insufficient funds
+        res = client.post(
+            "/api/mandate/simulate-webhook",
+            json={
+                "mandate_id": "man_sim_001",
+                "failure_code": "INSUFFICIENT_FUNDS",
+                "failure_date": "2026-08-26",
+            },
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["mandate_id"], "man_sim_001")
+        self.assertEqual(data["failure_code"], "INSUFFICIENT_FUNDS")
+        self.assertEqual(len(data["retry_dates"]), 3)
+        self.assertEqual(data["retry_dates"][0], "2026-08-29")
+        self.assertIn("Insufficient funds", data["strategy_notes"])
+
+        # Mandate expired
+        res_exp = client.post(
+            "/api/mandate/simulate-webhook",
+            json={
+                "mandate_id": "man_sim_002",
+                "failure_code": "MANDATE_EXPIRED",
+                "failure_date": "2026-08-26",
+            },
+        )
+        self.assertEqual(res_exp.status_code, 200)
+        data_exp = res_exp.json()
+        self.assertTrue(data_exp["ok"])
+        self.assertEqual(len(data_exp["retry_dates"]), 0)
+        self.assertIn("re-authorization", data_exp["strategy_notes"].lower())
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 

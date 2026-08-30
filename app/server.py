@@ -13,6 +13,7 @@ webhook is what tells the *system*, and it is the only one that arrives when the
 closes the tab mid-redirect. Suppression therefore hangs off the webhook alone.
 """
 
+import hmac
 import json
 import logging
 import os
@@ -20,7 +21,7 @@ import threading
 from datetime import date, timedelta
 
 import razorpay
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
@@ -36,6 +37,10 @@ from app.disputes import (
 )
 from app.ledger import InvoiceState
 from app.ledger import balance_paise as _balance_paise
+from app.mandate import (
+    MandateFailureCode,
+    plan_mandate_retries,
+)
 from app.operator import (
     approve_review_item,
     export_audit_events,
@@ -95,6 +100,7 @@ def _load_invoices() -> dict[str, dict]:
             "amount_received_paise": inv.get("amount_received_paise", 0),
             "tds_deducted_paise": inv.get("tds_deducted_paise", 0),
             "days_overdue": inv["days_overdue"],
+            "invoice_date": inv.get("invoice_date"),
             "contractual_due_date": inv.get("contractual_due_date"),
             "delivery_date": inv.get("delivery_date"),
             "written_agreement": inv.get("written_agreement", True),
@@ -587,10 +593,14 @@ def raise_dispute(body: DisputeRequest) -> JSONResponse:
     delivery_raw = invoice.get("delivery_date")
     if delivery_raw:
         delivery_d = date.fromisoformat(delivery_raw)
+    elif invoice.get("invoice_date"):
+        delivery_d = date.fromisoformat(invoice["invoice_date"])
     elif invoice.get("contractual_due_date"):
-        delivery_d = date.fromisoformat(invoice["contractual_due_date"]) - timedelta(days=45)
+        window = 45 if invoice.get("written_agreement", True) else 15
+        delivery_d = date.fromisoformat(invoice["contractual_due_date"]) - timedelta(days=window)
     else:
-        delivery_d = business_today() - timedelta(days=invoice.get("days_overdue", 30))
+        days_overdue = invoice.get("days_overdue") or 15
+        delivery_d = business_today() - timedelta(days=days_overdue)
 
     objection_d = business_today()
     written = invoice.get("written_agreement", True)
@@ -637,8 +647,59 @@ def raise_dispute(body: DisputeRequest) -> JSONResponse:
 
 
 # ---------------------------------------------------------------------------
+# Mandate Simulation Webhook
+# ---------------------------------------------------------------------------
+
+
+class MandateWebhookSimulateRequest(BaseModel):
+    mandate_id: str
+    failure_code: str
+    failure_date: date | None = None
+
+
+@app.post("/api/mandate/simulate-webhook")
+def simulate_mandate_webhook(body: MandateWebhookSimulateRequest) -> JSONResponse:
+    f_date = body.failure_date or business_today()
+    code = MandateFailureCode(body.failure_code)
+    plan = plan_mandate_retries(body.mandate_id, code, f_date)
+    return JSONResponse(
+        {
+            "ok": True,
+            "mandate_id": plan.mandate_id,
+            "failure_code": plan.failure_code.value,
+            "retry_dates": [d.isoformat() for d in plan.retry_dates],
+            "strategy_notes": plan.strategy_notes,
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
 # Operator Console: Review-First Mode, Kill Switch & Audit Exporter
 # ---------------------------------------------------------------------------
+
+
+def _extract_operator_key(request: Request) -> str | None:
+    key = request.headers.get("X-Operator-Key")
+    if key:
+        return key.strip()
+    auth = request.headers.get("Authorization")
+    if auth:
+        parts = auth.split(maxsplit=1)
+        if len(parts) == 2 and parts[0].lower() == "bearer":
+            return parts[1].strip()
+    if "key" in request.query_params:
+        return request.query_params["key"].strip()
+    if "api_key" in request.query_params:
+        return request.query_params["api_key"].strip()
+    return None
+
+
+def verify_operator_auth(request: Request) -> str:
+    expected = os.getenv("OPERATOR_API_KEY", "operator-secret-key")
+    key = _extract_operator_key(request)
+    if not key or not hmac.compare_digest(key, expected):
+        raise HTTPException(status_code=401, detail="Unauthorized operator access")
+    return key
 
 
 class KillSwitchRequest(BaseModel):
@@ -647,46 +708,62 @@ class KillSwitchRequest(BaseModel):
 
 class ReviewActionRequest(BaseModel):
     debtor_id: str
-    reason: str | None = None
+    reason: str | None = Field(default=None, max_length=2000)
 
 
 @app.get("/operator", response_class=HTMLResponse)
 def operator_dashboard(request: Request) -> HTMLResponse:
     """Render operator dashboard with live kill switch and review queue."""
+    expected = os.getenv("OPERATOR_API_KEY", "operator-secret-key")
+    key = _extract_operator_key(request)
+    if not key or key != expected:
+        return HTMLResponse(
+            "<h1>401 Unauthorized</h1><p>Invalid or missing operator credentials.</p>",
+            status_code=401,
+        )
     return templates.TemplateResponse(
         request,
         "operator.html",
         {
             "kill_switch_active": is_kill_switch_active(),
             "queue": get_review_queue(),
+            "operator_key": key,
         },
     )
 
 
 @app.post("/api/operator/kill-switch")
-def toggle_kill_switch(body: KillSwitchRequest) -> JSONResponse:
+def toggle_kill_switch(
+    body: KillSwitchRequest, _: str = Depends(verify_operator_auth)
+) -> JSONResponse:
     """Engage or disengage the master agent kill switch immediately."""
     new_state = set_kill_switch(body.active)
     return JSONResponse({"kill_switch_active": new_state})
 
 
 @app.get("/api/operator/queue")
-def list_review_queue() -> JSONResponse:
+def list_review_queue(_: str = Depends(verify_operator_auth)) -> JSONResponse:
     """Return all pending review-first actions."""
     return JSONResponse({"queue": get_review_queue()})
 
 
 @app.post("/api/operator/approve")
-def approve_action(body: ReviewActionRequest) -> JSONResponse:
+def approve_action(
+    body: ReviewActionRequest, _: str = Depends(verify_operator_auth)
+) -> JSONResponse:
     """Approve a review-first action and dispatch to communication channel."""
     res = approve_review_item(body.debtor_id)
     if res is None:
         return JSONResponse({"error": "debtor not found in review queue"}, status_code=404)
+    if res.get("approved") is False:
+        return JSONResponse(res, status_code=409)
     return JSONResponse(res)
 
 
 @app.post("/api/operator/reject")
-def reject_action(body: ReviewActionRequest) -> JSONResponse:
+def reject_action(
+    body: ReviewActionRequest, _: str = Depends(verify_operator_auth)
+) -> JSONResponse:
     """Reject a review-first action with a logged reason."""
     reason = body.reason or "Operator manual rejection"
     ok = reject_review_item(body.debtor_id, reason)
@@ -696,10 +773,14 @@ def reject_action(body: ReviewActionRequest) -> JSONResponse:
 
 
 @app.get("/api/operator/export")
-def export_audit_log(format: str = "json") -> Response:
+def export_audit_log(
+    format: str = "json", _: str = Depends(verify_operator_auth)
+) -> Response:
     """Export complete audit trail in JSON or CSV format."""
     exported = export_audit_events(format_type=format)
     media_type = "application/json" if format.lower() == "json" else "text/csv"
-    return Response(content=exported, media_type=media_type)
+    headers = {"Content-Disposition": f'attachment; filename="audit_events.{format.lower()}"'}
+    return Response(content=exported, media_type=media_type, headers=headers)
+
 
 
