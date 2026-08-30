@@ -30,6 +30,8 @@ class DraftedMessage:
     body: str
     is_statutory: bool
     dark_pattern_clean: bool
+    recipient_email: str | None = None
+    recipient_phone: str | None = None
 
 
 def validate_and_sanitize_copy(text: str) -> tuple[bool, str | None]:
@@ -48,20 +50,25 @@ def draft_message_for_decision(
     merchant: dict[str, Any],
     *,
     as_of: date,
+    recipient_email: str | None = None,
+    recipient_phone: str | None = None,
 ) -> DraftedMessage:
     """Draft concrete communication copy for a strategist recovery decision."""
     debtor_name = debtor.get("name", decision.debtor_name)
     merchant_name = merchant.get("name", "Supplier")
-    lang_str = str(debtor.get("language", decision.language)).lower()
+    lang_str = str(debtor.get("language") or decision.language).lower()
     is_hinglish = "hinglish" in lang_str or lang_str == "hi"
     actual_lang = Language.HINGLISH if is_hinglish else Language.EN
+
+    recipient_email = recipient_email or debtor.get("recipient_email") or debtor.get("email")
+    recipient_phone = recipient_phone or debtor.get("recipient_phone") or debtor.get("phone")
 
     resolution_url = decision.resolution_url or ""
     link_line = f"\nResolution Portal: {resolution_url}" if resolution_url else ""
 
     primary_invoice = invoices[0] if invoices else {}
-    invoice_ids = ", ".join(i["invoice_id"] for i in invoices)
-    ask_paise = decision.ask_amount_paise or sum(i.get("amount_paise", 0) for i in invoices)
+    invoice_ids = ", ".join(i.get("invoice_id", "") for i in invoices if "invoice_id" in i) if invoices else ""
+    ask_paise = decision.ask_amount_paise if decision.ask_amount_paise is not None else sum(i.get("amount_paise", 0) for i in invoices)
     ask_display = _format_inr_rupees(ask_paise)
 
     subject = ""
@@ -80,6 +87,8 @@ def draft_message_for_decision(
             body=body,
             is_statutory=False,
             dark_pattern_clean=True,
+            recipient_email=recipient_email,
+            recipient_phone=recipient_phone,
         )
 
     if decision.strategy == Strategy.HUMAN_HANDOFF:
@@ -99,6 +108,8 @@ def draft_message_for_decision(
             body=body,
             is_statutory=False,
             dark_pattern_clean=True,
+            recipient_email=recipient_email,
+            recipient_phone=recipient_phone,
         )
 
     if decision.strategy == Strategy.RECONCILE:
@@ -167,12 +178,15 @@ def draft_message_for_decision(
     elif decision.strategy == Strategy.ESCALATE:
         # Check statutory eligibility
         stat_eval = evaluate_section_43b_h(merchant, primary_invoice, as_of)
-        if stat_eval.is_eligible and primary_invoice.get("days_overdue", 0) > 15:
+        days_overdue = primary_invoice.get("days_overdue") or 0
+        if stat_eval.is_eligible and days_overdue > 15:
             is_statutory = True
             # Compute section 16 interest
-            due_d = date.fromisoformat(primary_invoice.get("contractual_due_date", as_of.isoformat()))
+            raw_due = primary_invoice.get("contractual_due_date") or as_of.isoformat()
+            due_d = date.fromisoformat(raw_due)
             interest_res = calculate_section_16_interest(ask_paise, due_d, as_of)
             interest_disp = _format_inr_rupees(interest_res.accrued_interest_paise)
+            total_payable_disp = _format_inr_rupees(interest_res.total_payable_paise)
 
             if is_hinglish:
                 subject = f"Formal Statutory Notice: Section 15/16 MSMED Act - Invoices {invoice_ids}"
@@ -182,7 +196,7 @@ def draft_message_for_decision(
                     f"interest of {interest_disp} (at 3x RBI rate) has accrued.\n\n"
                     f"Important Tax Notice: Section 43B(h) of the Income Tax Act ke tahat outstanding dues year-end par "
                     f"disallow ho sakte hain if unpaid.\n\n"
-                    f"Kripya total payable amount {interest_disp} clear karein: {link_line}\n\n"
+                    f"Kripya total payable amount {total_payable_disp} clear karein: {link_line}\n\n"
                     f"Authorized Signatory,\n{merchant_name}"
                 )
             else:
@@ -200,11 +214,12 @@ def draft_message_for_decision(
         else:
             # Refusal path: Supplier is ineligible trader or invoice not eligible
             is_statutory = False
+            refusal_reason = stat_eval.refusal_reason or "Invoice overdue days <= 15 grace threshold"
             audit.record(
                 "statute.section_43b_h_refused",
                 merchant_id=merchant.get("merchant_id", ""),
                 debtor_id=decision.debtor_id,
-                refusal_reason=stat_eval.refusal_reason or "Supplier ineligible for MSMED notices",
+                refusal_reason=refusal_reason,
             )
             if is_hinglish:
                 subject = f"Urgent Commercial Payment Escalation - {merchant_name} ({invoice_ids})"
@@ -281,6 +296,7 @@ def draft_message_for_decision(
             f"You may review the details and settle through the portal:{link_line}\n\n"
             f"Sincerely,\n{merchant_name}"
         )
+        is_clean = True
 
     draft = DraftedMessage(
         debtor_id=decision.debtor_id,
@@ -291,6 +307,8 @@ def draft_message_for_decision(
         body=body,
         is_statutory=is_statutory,
         dark_pattern_clean=is_clean,
+        recipient_email=recipient_email,
+        recipient_phone=recipient_phone,
     )
 
     audit.record(

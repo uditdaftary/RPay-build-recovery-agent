@@ -83,9 +83,11 @@ def msmed_eligible(merchant: Merchant) -> tuple[bool, str]:
     """
     if not merchant.udyam_registered:
         return False, "supplier is not registered on Udyam, so MSMED s.15/16 does not apply"
-    if merchant.udyam_category == "medium":
+    category = str(merchant.udyam_category or "").strip().lower()
+    activity = str(merchant.udyam_activity.value if hasattr(merchant.udyam_activity, "value") else merchant.udyam_activity or "").strip().lower()
+    if category == "medium":
         return False, "MSMED delayed payment provisions cover micro and small only, not medium"
-    if merchant.udyam_activity == UdyamActivity.TRADING:
+    if activity == "trading" or activity == UdyamActivity.TRADING.value:
         return (
             False,
             "supplier is registered as a trader; traders are excluded from the MSMED "
@@ -211,7 +213,7 @@ def balance_paise(invoice: dict) -> int:
     here rather than three times over.
     """
     return (
-        invoice["amount_paise"]
+        invoice.get("amount_paise", 0)
         - invoice.get("amount_received_paise", 0)
         - invoice.get("tds_deducted_paise", 0)
     )
@@ -224,7 +226,7 @@ def invoice_outstanding_paise(invoice: dict) -> int:
     `Invoice` instance. One formula, so a fix to the rounding or the field name only has
     one place to land.
     """
-    return invoice["amount_paise"] - invoice.get("amount_received_paise", 0)
+    return invoice.get("amount_paise", 0) - invoice.get("amount_received_paise", 0)
 
 
 def invoice_collectible_paise(invoice: dict) -> int:
