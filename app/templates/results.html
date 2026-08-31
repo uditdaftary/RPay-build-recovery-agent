@@ -584,9 +584,11 @@
         <pre id="modal-body" style="white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; line-height: 1.5; background: #0f172a; color: #f8fafc; padding: 14px; border-radius: 8px; margin: 0; max-height: 320px; overflow-y: auto;"></pre>
       </div>
 
-      <!-- Compliance indicator -->
-      <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; padding: 10px 12px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px;">
-        <span style="color: #166534; font-weight: 500;">&#10004; Verified anti-dark-pattern compliant &bull; Razorpay link attached</span>
+      <!-- Compliance indicator. Bound to the drafted message's own dark_pattern_clean flag:
+           a fixed "compliant" string here would assert the very thing the flag exists to
+           measure, including for copy that tripped the filter and had to be rewritten. -->
+      <div id="modal-compliance" style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; padding: 10px 12px; border-radius: 6px;">
+        <span id="modal-compliance-text" style="font-weight: 500;"></span>
         <button class="btn btn-secondary" style="font-size: 12px; padding: 6px 14px;" onclick="closeCopyModal()">Close</button>
       </div>
     </div>
@@ -681,11 +683,25 @@
     }
     badgesContainer.appendChild(stat);
 
-    // Anti-Dark-Pattern Clean
+    // Anti-dark-pattern verdict, read from the draft rather than asserted. `false` means
+    // the first draft tripped a prohibited phrase and was rewritten to fallback copy, which
+    // is a materially different claim from copy that passed on the first pass.
+    const isClean = copy.dark_pattern_clean !== false;
     const dp = document.createElement("span");
-    dp.className = "badge-pill badge-emerald";
-    dp.innerText = "Anti-Dark-Pattern: Verified Clean";
+    dp.className = isClean ? "badge-pill badge-emerald" : "badge-pill badge-rose";
+    dp.innerText = isClean
+      ? "Anti-Dark-Pattern: Verified Clean"
+      : "Anti-Dark-Pattern: Rewritten by filter";
     badgesContainer.appendChild(dp);
+
+    const compliance = document.getElementById("modal-compliance");
+    const complianceText = document.getElementById("modal-compliance-text");
+    compliance.style.background = isClean ? "#f0fdf4" : "#fef2f2";
+    compliance.style.border = isClean ? "1px solid #bbf7d0" : "1px solid #fecaca";
+    complianceText.style.color = isClean ? "#166534" : "#991b1b";
+    complianceText.innerText = isClean
+      ? "✔ Verified anti-dark-pattern compliant • Razorpay link attached"
+      : "⚠ Original draft tripped the anti-dark-pattern filter and was replaced with compliant fallback copy";
 
     document.getElementById("copy-modal").classList.add("active");
   }

@@ -16,6 +16,43 @@ class TestPipelineOrchestration(unittest.TestCase):
         set_kill_switch(False)
         self.enterContext(isolated_audit_log())
         self.ledger = generate(seed=42)
+        # The seeded ledger carries no contact fields, and the generator must not grow any:
+        # its seed-42 fingerprint is the reproducibility claim that verify_all.py Gate 3
+        # enforces. Contacts are injected here so the tests below can exercise the dispatch
+        # path at all. What the SHIPPED ledger actually does is asserted separately, in
+        # test_seeded_ledger_dispatches_nothing_without_contacts, so this fixture cannot
+        # quietly stand in for production behaviour.
+        for i, d in enumerate(self.ledger["debtors"]):
+            d["email"] = f"{d['debtor_id'].lower()}@customercorp.in"
+            d["phone"] = f"+9198000000{i:02d}"
+
+    def test_seeded_ledger_dispatches_nothing_without_contacts(self):
+        """The shipped ledger has no email or phone, so nothing may go out unattended.
+
+        Removing the fabricated-recipient fallback made this the real end-to-end behaviour:
+        every contactable decision routes to a human instead of guessing an address. That is
+        the intended outcome, but it is a property worth failing on if it changes silently -
+        either because contacts were added to the generator or because address synthesis
+        came back.
+        """
+        pristine = generate(seed=42)
+        self.assertNotIn("email", pristine["debtors"][0])
+        self.assertNotIn("phone", pristine["debtors"][0])
+
+        result = execute_recovery_pipeline(pristine, as_of=date(2026, 8, 26), dry_run=True)
+
+        self.assertEqual(result.automated_dispatches, 0)
+        self.assertEqual(result.total_evaluated, 20)
+        self.assertEqual(result.suppressed_opt_out, 1)
+        # 18 rather than 19: one debtor's decision carries Channel.NONE (a WAIT or a
+        # handoff reaches nobody), so it is neither dispatched nor queued.
+        self.assertEqual(result.review_queued, 18)
+
+        sent = [
+            e for e in audit.read_all()
+            if e.get("event") in ("channel.email_sent", "channel.whatsapp_sent")
+        ]
+        self.assertEqual(sent, [])
 
     def test_full_pipeline_run_routes_correctly(self):
         result = execute_recovery_pipeline(self.ledger, as_of=date(2026, 8, 26), dry_run=True)
@@ -93,12 +130,14 @@ class TestPipelineOrchestration(unittest.TestCase):
         if sent_events:
             self.assertIn(sent_events[-1].get("recipient"), ("custom.finance@debtorcorp.in", "+919888877777"))
 
-    def test_synthetic_fallback_email_domain_sanitization(self):
+    def test_missing_contact_routes_to_human_review_without_synthesis(self):
         target_debtor = None
         for d in self.ledger["debtors"]:
             if not d.get("opted_out"):
                 d["email"] = None
-                d["name"] = "Acme Corp., Pvt. Ltd."
+                d["recipient_email"] = None
+                d["phone"] = None
+                d["recipient_phone"] = None
                 target_debtor = d
                 break
 
@@ -106,14 +145,31 @@ class TestPipelineOrchestration(unittest.TestCase):
         execute_recovery_pipeline(self.ledger, as_of=date(2026, 8, 26), dry_run=True)
 
         events = audit.read_all()
+        # Verify no fake emails or fake phones were dispatched for this debtor
         sent_events = [
             e for e in events
-            if e.get("debtor_id") == target_debtor["debtor_id"] and e.get("event") == "channel.email_sent"
+            if e.get("debtor_id") == target_debtor["debtor_id"] and e.get("event") in ("channel.email_sent", "channel.whatsapp_sent")
         ]
-        if sent_events:
-            recipient = sent_events[-1].get("recipient")
-            self.assertNotIn("..", recipient)
-            self.assertTrue(recipient.endswith("@acmecorppvtltd.in"))
+        self.assertEqual(len(sent_events), 0)
+
+    def test_opted_out_debtor_suppressed_completely(self):
+        opted_out_ids = [d["debtor_id"] for d in self.ledger["debtors"] if d.get("opted_out")]
+        self.assertTrue(len(opted_out_ids) > 0)
+        execute_recovery_pipeline(self.ledger, as_of=date(2026, 8, 26), dry_run=True)
+
+        events = audit.read_all()
+        for opt_id in opted_out_ids:
+            # Opted out debtor should never have automated dispatches or reviews queued
+            dispatched = [
+                e for e in events
+                if e.get("debtor_id") == opt_id and e.get("event") in ("channel.email_sent", "channel.whatsapp_sent", "operator.review_queued")
+            ]
+            self.assertEqual(len(dispatched), 0)
+            opt_out_logged = [
+                e for e in events
+                if e.get("debtor_id") == opt_id and e.get("event") == "pipeline.debtor_opted_out"
+            ]
+            self.assertEqual(len(opt_out_logged), 1)
 
 
 if __name__ == "__main__":

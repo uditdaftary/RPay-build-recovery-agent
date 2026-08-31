@@ -66,29 +66,12 @@ def main() -> None:
         sys.exit(1)
     print("PASS: Benchmark experiment executed successfully.")
 
-    # Gate 5: Leak Detection
-    print("\n[Gate 5/5] Scanning for private strategy document leaks & secrets...")
-    prohibited = [
-        "Product.md",
-        "strategy-verdict",
-        "openitems",
-        "CLAUDE.md",
-        "plan-day-",
-        "razorpay-buildathon-timeline",
-    ]
-    leaks = []
-    scanned_suffixes = {".py", ".md", ".html", ".json", ".toml", ".txt"}
-    for p in repo_root.rglob("*"):
-        if (
-            p.is_file()
-            and p.suffix in scanned_suffixes
-            and p.name not in ("verify_all.py", "test_hygiene.py")
-            and not any(part.startswith((".", "__pycache__", "venv")) for part in p.parts)
-        ):
-            text = p.read_text(encoding="utf-8", errors="ignore")
-            for term in prohibited:
-                if term in text:
-                    leaks.append(f"{p.relative_to(repo_root)}: contains reference to '{term}'")
+    # Gate 5: Leak Detection. Same scan the unit suite runs, imported rather than restated,
+    # so this gate and test_hygiene.py cannot enforce different rules.
+    print("\n[Gate 5/5] Scanning for private strategy document leaks...")
+    from app.hygiene import scan_for_private_references
+
+    leaks = scan_for_private_references(repo_root)
 
     if leaks:
         print("\nFAIL: Private document reference leaks detected:")

@@ -12,8 +12,12 @@ from typing import Any
 
 from app import audit
 from app.envelope import Channel, Language, Strategy, Tone
+from app.ledger import invoice_collectible_paise
 from app.statute import (
+    DEFAULT_RBI_BANK_RATE_PCT,
+    STATUTORY_RATE_MULTIPLIER,
     calculate_section_16_interest,
+    compute_statutory_dates,
     evaluate_section_43b_h,
     validate_section_43b_h_copy,
 )
@@ -43,6 +47,50 @@ def _format_inr_rupees(paise: int) -> str:
     return f"Rs {paise // 100:,}"
 
 
+def _statutory_due_date(invoice: dict[str, Any], as_of: date) -> date:
+    """The MSMED s.15 due date for one invoice, run from acceptance rather than the contract.
+
+    Falls back to the contractual date only when the invoice carries neither a delivery nor
+    an invoice date, because without one there is nothing to start the statutory clock from.
+    """
+    raw_delivery = invoice.get("delivery_date") or invoice.get("invoice_date")
+    if raw_delivery:
+        _, statutory_due, _ = compute_statutory_dates(
+            date.fromisoformat(raw_delivery),
+            written_agreement=invoice.get("written_agreement", True),
+        )
+        if statutory_due is not None:
+            return statutory_due
+    raw_due = invoice.get("contractual_due_date")
+    return date.fromisoformat(raw_due) if raw_due else as_of
+
+
+def _accrued_section_16_interest(
+    invoices: list[dict[str, Any]], as_of: date
+) -> tuple[int, float]:
+    """Section 16 interest summed per invoice, each priced from its own statutory due date.
+
+    One invoice's clock must not price another's balance. Computing once on the debtor's
+    aggregate charged a 20-day-overdue invoice at a 90-day-overdue invoice's rate, which
+    overstates the figure in a formal demand notice. Only invoices with something still
+    collectible accrue: a balance settled by TDS credit or off-rail payment owes nothing.
+
+    Returns (accrued_interest_paise, annual_rate_pct).
+    """
+    accrued = 0
+    rate_pct = float(DEFAULT_RBI_BANK_RATE_PCT * STATUTORY_RATE_MULTIPLIER)
+    for invoice in invoices:
+        collectible = invoice_collectible_paise(invoice)
+        if collectible <= 0:
+            continue
+        result = calculate_section_16_interest(
+            collectible, _statutory_due_date(invoice, as_of), as_of
+        )
+        accrued += result.accrued_interest_paise
+        rate_pct = result.annual_rate_pct
+    return accrued, rate_pct
+
+
 def draft_message_for_decision(
     decision: StrategistDecision,
     debtor: dict[str, Any],
@@ -66,7 +114,15 @@ def draft_message_for_decision(
     resolution_url = decision.resolution_url or ""
     link_line = f"\nResolution Portal: {resolution_url}" if resolution_url else ""
 
-    primary_invoice = invoices[0] if invoices else {}
+    collectible_invoices = [i for i in invoices if invoice_collectible_paise(i) > 0]
+    primary_invoice = (
+        max(collectible_invoices, key=lambda inv: inv.get("days_overdue", 0), default=None)
+        if collectible_invoices
+        else (max(invoices, key=lambda inv: inv.get("days_overdue", 0), default=None) if invoices else {})
+    )
+    if primary_invoice is None:
+        primary_invoice = {}
+
     invoice_ids = ", ".join(i.get("invoice_id", "") for i in invoices if "invoice_id" in i) if invoices else ""
     ask_paise = decision.ask_amount_paise if decision.ask_amount_paise is not None else sum(i.get("amount_paise", 0) for i in invoices)
     ask_display = _format_inr_rupees(ask_paise)
@@ -181,12 +237,12 @@ def draft_message_for_decision(
         days_overdue = primary_invoice.get("days_overdue") or 0
         if stat_eval.is_eligible and days_overdue > 15:
             is_statutory = True
-            # Compute section 16 interest
-            raw_due = primary_invoice.get("contractual_due_date") or as_of.isoformat()
-            due_d = date.fromisoformat(raw_due)
-            interest_res = calculate_section_16_interest(ask_paise, due_d, as_of)
-            interest_disp = _format_inr_rupees(interest_res.accrued_interest_paise)
-            total_payable_disp = _format_inr_rupees(interest_res.total_payable_paise)
+            # Section 16 interest, summed per invoice from each invoice's own statutory due
+            # date under s.15. The principal demanded stays the envelope-approved ask, which
+            # may already carry a clamp; the interest is what the balances actually accrued.
+            accrued_interest_paise, annual_rate_pct = _accrued_section_16_interest(invoices, as_of)
+            interest_disp = _format_inr_rupees(accrued_interest_paise)
+            total_payable_disp = _format_inr_rupees(ask_paise + accrued_interest_paise)
 
             if is_hinglish:
                 subject = f"Formal Statutory Notice: Section 15/16 MSMED Act - Invoices {invoice_ids}"
@@ -205,7 +261,7 @@ def draft_message_for_decision(
                     f"To the Board of Directors / Finance Department, {debtor_name}:\n\n"
                     f"Re: Statutory demand for outstanding dues on Invoice(s) {invoice_ids} ({ask_display}).\n\n"
                     f"Under Section 15 and Section 16 of the Micro, Small and Medium Enterprises Development (MSMED) Act, 2006, "
-                    f"mandatory compound interest with monthly rests at 3x the RBI Bank Rate ({interest_res.annual_rate_pct:.2f}% p.a.) "
+                    f"mandatory compound interest with monthly rests at 3x the RBI Bank Rate ({annual_rate_pct:.2f}% p.a.) "
                     f"accrues on delayed sums, currently amounting to {interest_disp}.\n\n"
                     f"Statutory Tax Note: {stat_eval.compliant_notice_copy}\n\n"
                     f"Please settle the outstanding balance via the secure portal:{link_line}\n\n"
@@ -225,8 +281,8 @@ def draft_message_for_decision(
                 subject = f"Urgent Commercial Payment Escalation - {merchant_name} ({invoice_ids})"
                 body = (
                     f"Dear {debtor_name},\n\n"
-                    f"Invoice(s) {invoice_ids} ({ask_display}) severely overdue hain. Hamara commercial payment reminder "
-                    f"hai ki kripya balance turant settle karein to avoid commercial account suspension.\n"
+                    f"Invoice(s) {invoice_ids} ({ask_display}) overdue hain. Hamara commercial payment reminder "
+                    f"hai ki kripya balance settle karein:\n"
                     f"{link_line}\n\n"
                     f"Regards,\n{merchant_name}"
                 )
@@ -261,7 +317,10 @@ def draft_message_for_decision(
             )
 
     else:
-        # Standard REQUEST_PAYMENT / NEGOTIATE_PARTIAL
+        # REQUEST_PAYMENT and NEGOTIATE_PARTIAL share this copy. They were split into two
+        # branches that rendered byte-identical English, which is two templates to keep in
+        # step for no difference in what the debtor reads. Split them again only when the
+        # concession ask genuinely needs to read differently from the reminder.
         if is_hinglish:
             subject = f"Payment Reminder - {merchant_name} ({invoice_ids})"
             body = (
@@ -283,6 +342,7 @@ def draft_message_for_decision(
 
     # Anti-Dark-Pattern Verification & Sanitization
     is_clean, failure_reason = validate_and_sanitize_copy(body)
+    initial_clean = is_clean
     if not is_clean:
         audit.record(
             "message.rejected_dark_pattern",
@@ -296,7 +356,6 @@ def draft_message_for_decision(
             f"You may review the details and settle through the portal:{link_line}\n\n"
             f"Sincerely,\n{merchant_name}"
         )
-        is_clean = True
 
     draft = DraftedMessage(
         debtor_id=decision.debtor_id,
@@ -306,7 +365,7 @@ def draft_message_for_decision(
         subject=subject,
         body=body,
         is_statutory=is_statutory,
-        dark_pattern_clean=is_clean,
+        dark_pattern_clean=initial_clean,
         recipient_email=recipient_email,
         recipient_phone=recipient_phone,
     )

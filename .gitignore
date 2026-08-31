@@ -20,3 +20,11 @@ audit/*.jsonl
 .worktrees/
 context.md
 .DS_Store
+CLAUDE.md
+
+# Debtor contact directory. Deliberately outside data/ledger.json, whose seed-42
+# fingerprint is the reproducibility claim, and never committed: real addresses.
+data/contacts.json
+
+.vercel
+.env*

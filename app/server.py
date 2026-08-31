@@ -18,6 +18,8 @@ import json
 import logging
 import os
 import threading
+from collections import OrderedDict
+from copy import deepcopy
 from datetime import date, timedelta
 
 import razorpay
@@ -27,7 +29,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, field_validator
 
-from app import audit, config, razorpay_gateway
+from app import audit, config, contacts, razorpay_gateway, store
 from app.config import PROJECT_ROOT, business_today
 from app.contact_history import MAX_PROMISE_WINDOWS_WITHOUT_SETTLEMENT
 from app.disputes import (
@@ -217,7 +219,14 @@ def format_inr(paise: int) -> str:
     return f"{digits}.{remainder:02d}"
 
 
+def _lookup_invoice(token: str) -> dict | None:
+    """An invoice with its durable lifecycle folded in. The only way to read INVOICES."""
+    _hydrate_invoices()
+    return INVOICES.get(token)
+
+
 def _find_invoice(order_id: str) -> tuple[str, dict] | tuple[None, None]:
+    _hydrate_invoices()
     for token, invoice in INVOICES.items():
         if order_id in invoice.get("razorpay_order_ids", ()):
             return token, invoice
@@ -229,6 +238,47 @@ def _find_invoice(order_id: str) -> tuple[str, dict] | tuple[None, None]:
 # without this, both could read "not yet processed" before either records it, double
 # crediting one payment.
 _SETTLEMENT_LOCK = threading.Lock()
+
+
+# The fields `INVOICES` mutates at runtime. Everything else on an invoice comes from
+# data/ledger.json and never changes, because the ledger is the experiment's seed and has
+# to stay byte-identical - so only these are written to the durable store.
+RUNTIME_INVOICE_FIELDS = (
+    "status",
+    "amount_received_paise",
+    "promised_date",
+    "promised_amount_paise",
+    "promise_windows",
+    "processed_payment_ids",
+    "razorpay_order_ids",
+    "dispute_reason",
+    "dispute_category",
+    "evidence_required",
+    "statutory_clock_suspended",
+)
+
+
+def _persist_invoice(invoice: dict) -> None:
+    """Write one invoice's runtime lifecycle to the store, if there is one."""
+    if not store.is_enabled():
+        return
+    state = {k: invoice[k] for k in RUNTIME_INVOICE_FIELDS if k in invoice}
+    store.save_invoice_runtime(invoice["invoice_id"], state)
+
+
+def _hydrate_invoices() -> None:
+    """Fold the durable lifecycle back over the ledger-derived view.
+
+    `INVOICES` is process memory, and on serverless the instance that serves the payment
+    is rarely the one that served the page. Without this a settlement recorded by the
+    webhook is invisible to the next request and the debtor keeps being chased.
+    """
+    if not store.is_enabled():
+        return
+    for invoice_id, state in store.load_invoice_runtime().items():
+        invoice = INVOICES.get(invoice_id)
+        if invoice is not None:
+            invoice.update(state)
 
 
 def suppress_on_settlement(token: str, invoice: dict, payment_id: str, amount_paise: int) -> None:
@@ -245,7 +295,16 @@ def suppress_on_settlement(token: str, invoice: dict, payment_id: str, amount_pa
     """
     with _SETTLEMENT_LOCK:
         processed = invoice.setdefault("processed_payment_ids", [])
-        if payment_id in processed or invoice["status"] == "PAID":
+        # The replay guard. In one process the list plus the lock is enough; across
+        # serverless instances neither is shared, so the database decides instead and the
+        # conditional insert is the lock. `claim_payment` returns False when this capture
+        # has already been applied by any instance.
+        already_seen = (
+            not store.claim_payment(invoice["invoice_id"], payment_id)
+            if store.is_enabled()
+            else payment_id in processed
+        )
+        if already_seen or invoice["status"] == "PAID":
             audit.record(
                 "settlement.duplicate_ignored",
                 invoice_id=invoice["invoice_id"],
@@ -259,6 +318,7 @@ def suppress_on_settlement(token: str, invoice: dict, payment_id: str, amount_pa
 
         if remaining > 0:
             invoice["status"] = str(InvoiceState.PARTIALLY_PAID)
+            _persist_invoice(invoice)
             audit.record(
                 "settlement.partial",
                 invoice_id=invoice["invoice_id"],
@@ -272,6 +332,7 @@ def suppress_on_settlement(token: str, invoice: dict, payment_id: str, amount_pa
             return
 
         invoice["status"] = "PAID"
+        _persist_invoice(invoice)
         audit.record(
             "settlement.confirmed",
             invoice_id=invoice["invoice_id"],
@@ -292,6 +353,13 @@ def health() -> dict[str, object]:
         "webhook_secret_configured": bool(config.RAZORPAY_WEBHOOK_SECRET),
         "model_key_configured": bool(config.GOOGLE_API_KEY),
         "model": config.LLM_MODEL,
+        # Whether state survives this process. False on a serverless deployment with no
+        # DATABASE_URL, where the audit log the envelope folds is scratch space and the
+        # kill switch only ever halts the instance that served the request.
+        "durable_state": store.is_enabled(),
+        "audit_log_ephemeral": audit.ephemeral_fallback_active(),
+        "send_mode": contacts.send_mode(),
+        "delivery_allowlist_configured": bool(contacts.allowed_recipient()),
     }
 
 
@@ -306,7 +374,7 @@ def index(request: Request) -> HTMLResponse:
 
 @app.get("/r/{token}", response_class=HTMLResponse)
 def resolution_page(request: Request, token: str) -> HTMLResponse:
-    invoice = INVOICES.get(token)
+    invoice = _lookup_invoice(token)
     if invoice is None:
         return HTMLResponse("<h1>This link is not valid.</h1>", status_code=404)
 
@@ -343,7 +411,7 @@ class CreateOrderRequest(BaseModel):
 
 @app.post("/api/create-order")
 def create_order(body: CreateOrderRequest) -> JSONResponse:
-    invoice = INVOICES.get(body.token)
+    invoice = _lookup_invoice(body.token)
     if invoice is None:
         return JSONResponse({"error": "unknown token"}, status_code=404)
 
@@ -386,6 +454,9 @@ def create_order(body: CreateOrderRequest) -> JSONResponse:
         return JSONResponse({"error": "could not reach the payment gateway"}, status_code=502)
 
     invoice.setdefault("razorpay_order_ids", []).append(order["id"])
+    # Persisted so the webhook can match this order back to its invoice even when the
+    # capture is delivered to a different instance than the one that created the order.
+    _persist_invoice(invoice)
     audit.record(
         "order.created",
         invoice_id=invoice["invoice_id"],
@@ -497,7 +568,7 @@ class PromiseRequest(BaseModel):
 
 @app.post("/api/promise")
 def record_promise(body: PromiseRequest) -> JSONResponse:
-    invoice = INVOICES.get(body.token)
+    invoice = _lookup_invoice(body.token)
     if invoice is None:
         return JSONResponse({"error": "unknown token"}, status_code=404)
     blocked = _mutation_blocked(invoice)
@@ -559,6 +630,7 @@ def record_promise(body: PromiseRequest) -> JSONResponse:
     invoice["status"] = "PROMISED"
     invoice["promised_date"] = body.promised_date.isoformat()
     invoice["promised_amount_paise"] = amount
+    _persist_invoice(invoice)
 
     audit.record(
         "promise.made",
@@ -582,7 +654,7 @@ class DisputeRequest(BaseModel):
 
 @app.post("/api/dispute")
 def raise_dispute(body: DisputeRequest) -> JSONResponse:
-    invoice = INVOICES.get(body.token)
+    invoice = _lookup_invoice(body.token)
     if invoice is None:
         return JSONResponse({"error": "unknown token"}, status_code=404)
     blocked = _mutation_blocked(invoice, allow_disputed=True)
@@ -619,6 +691,7 @@ def raise_dispute(body: DisputeRequest) -> JSONResponse:
     invoice["dispute_category"] = category.value
     invoice["evidence_required"] = evidence
     invoice["statutory_clock_suspended"] = statutory_clock_suspended
+    _persist_invoice(invoice)
 
     audit.record(
         "dispute.raised",
@@ -697,9 +770,9 @@ def _extract_operator_key(request: Request) -> str | None:
 
 
 def verify_operator_auth(request: Request) -> str:
-    expected = os.getenv("OPERATOR_API_KEY", "operator-secret-key")
+    expected = os.getenv("OPERATOR_API_KEY", "").strip()
     key = _extract_operator_key(request)
-    if not key or not hmac.compare_digest(key, expected):
+    if not expected or not key or not hmac.compare_digest(key, expected):
         raise HTTPException(status_code=401, detail="Unauthorized operator access")
     return key
 
@@ -716,9 +789,9 @@ class ReviewActionRequest(BaseModel):
 @app.get("/operator", response_class=HTMLResponse)
 def operator_dashboard(request: Request) -> HTMLResponse:
     """Render operator dashboard with live kill switch and review queue."""
-    expected = os.getenv("OPERATOR_API_KEY", "operator-secret-key")
+    expected = os.getenv("OPERATOR_API_KEY", "").strip()
     key = _extract_operator_key(request)
-    if not key or not hmac.compare_digest(key, expected):
+    if not expected or not key or not hmac.compare_digest(key, expected):
         return HTMLResponse(
             "<h1>401 Unauthorized</h1><p>Invalid or missing operator credentials.</p>",
             status_code=401,
@@ -841,12 +914,43 @@ ARCHETYPE_DETAILS: dict[int, dict[str, str]] = {
 }
 
 
+# The published demo run. Anything else on the HTTP surface is an operator-only request,
+# because a benchmark run is a full portfolio evaluation and `seed` and `as_of` come
+# straight off the query string.
+DEFAULT_RESULTS_SEED = 42
+DEFAULT_RESULTS_AS_OF = "2026-08-26"
+
+# Bounded, and small on purpose. The key is (seed, as_of), both caller-supplied, so an
+# unbounded dict here is a way to grow the heap one 13 KB benchmark at a time. FIFO
+# eviction rather than true LRU: the working set is the default key plus whatever an
+# operator is currently comparing against, and that fits either way.
+_RESULTS_CACHE: OrderedDict[tuple[int, str], dict[str, object]] = OrderedDict()
+_RESULTS_CACHE_MAX = 8
+
+
+def _require_default_results_params(request: Request, seed: int, as_of: str, live_llm: bool) -> None:
+    """Anything beyond the published demo run costs a full experiment, so it needs a key.
+
+    `live_llm` spends real model budget; a non-default `seed` or `as_of` spends CPU and a
+    cache slot. All three are unauthenticated query parameters, so they are gated together
+    rather than one at a time.
+    """
+    if live_llm or seed != DEFAULT_RESULTS_SEED or as_of != DEFAULT_RESULTS_AS_OF:
+        verify_operator_auth(request)
+
+
 def get_results_data(
     seed: int = 42,
     as_of: str = "2026-08-26",
     live_llm: bool = False,
 ) -> dict[str, object]:
     """Execute evaluation run and return enriched benchmark results."""
+    cache_key = (seed, as_of)
+    if not live_llm and cache_key in _RESULTS_CACHE:
+        # A copy, not the stored dict. Handing out the cached object makes every caller a
+        # potential writer of every later caller's response.
+        return deepcopy(_RESULTS_CACHE[cache_key])
+
     with isolated_audit_log():
         exp = run_experiment(seed=seed, as_of=as_of, live_llm=live_llm)
 
@@ -904,7 +1008,7 @@ def get_results_data(
                 "drafted_copy_preview": copy_preview,
             })
 
-        return {
+        res_data = {
             "seed": exp.seed,
             "as_of": exp.as_of,
             "is_live_llm": exp.is_live_llm,
@@ -925,20 +1029,29 @@ def get_results_data(
             "comparative_metrics": exp.comparative_metrics,
             "adjudication_matrix": enriched_matrix,
         }
+        if not live_llm:
+            _RESULTS_CACHE[cache_key] = deepcopy(res_data)
+            while len(_RESULTS_CACHE) > _RESULTS_CACHE_MAX:
+                _RESULTS_CACHE.popitem(last=False)
+        return res_data
 
 
 @app.get("/api/results")
 def get_api_results(
+    request: Request,
     seed: int = 42,
     as_of: str = "2026-08-26",
     live_llm: bool = False,
 ) -> JSONResponse:
     """Return complete benchmark evaluation dataset in JSON format."""
+    # Shape before authorisation: a malformed date is a 400 whoever asks, and answering it
+    # with a 401 would tell a caller their date was fine when it was not.
     try:
         if as_of:
             date.fromisoformat(as_of)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"Invalid as_of date parameter: {exc}") from exc
+    _require_default_results_params(request, seed, as_of, live_llm)
 
     try:
         data = get_results_data(seed=seed, as_of=as_of, live_llm=live_llm)
@@ -956,11 +1069,13 @@ def results_page(
     live_llm: bool = False,
 ) -> HTMLResponse:
     """Render counterfactual benchmark evaluation dashboard."""
+    # Shape before authorisation; see the note on the JSON endpoint.
     try:
         if as_of:
             date.fromisoformat(as_of)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"Invalid as_of date parameter: {exc}") from exc
+    _require_default_results_params(request, seed, as_of, live_llm)
 
     try:
         data = get_results_data(seed=seed, as_of=as_of, live_llm=live_llm)

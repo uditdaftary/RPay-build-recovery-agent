@@ -1,4 +1,6 @@
+import os
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -49,10 +51,30 @@ class TestResultsUIAndAPI(unittest.TestCase):
         self.assertIn("drafted_copy_preview", first_case)
 
     def test_get_api_results_custom_seed_and_as_of(self):
-        response = self.client.get("/api/results?seed=42&as_of=2026-08-30")
+        """A non-default benchmark parameter is a full experiment run, so it needs a key."""
+        unauthenticated = self.client.get("/api/results?seed=42&as_of=2026-08-30")
+        self.assertEqual(unauthenticated.status_code, 401)
+
+        with patch.dict(os.environ, {"OPERATOR_API_KEY": "test-operator-key"}):
+            response = self.client.get(
+                "/api/results?seed=42&as_of=2026-08-30",
+                headers={"X-Operator-Key": "test-operator-key"},
+            )
         self.assertEqual(response.status_code, 200)
-        data = response.json()
-        self.assertEqual(data["as_of"], "2026-08-30")
+        self.assertEqual(response.json()["as_of"], "2026-08-30")
+
+    def test_results_cache_is_bounded(self):
+        """The cache key is caller-supplied, so it must not grow without limit."""
+        from app.server import _RESULTS_CACHE, _RESULTS_CACHE_MAX
+
+        with patch.dict(os.environ, {"OPERATOR_API_KEY": "test-operator-key"}):
+            for seed in range(_RESULTS_CACHE_MAX + 3):
+                res = self.client.get(
+                    f"/api/results?seed={seed}",
+                    headers={"X-Operator-Key": "test-operator-key"},
+                )
+                self.assertEqual(res.status_code, 200)
+        self.assertLessEqual(len(_RESULTS_CACHE), _RESULTS_CACHE_MAX)
 
     def test_results_html_page_renders_cleanly(self):
         response = self.client.get("/results")
@@ -97,6 +119,13 @@ class TestResultsUIAndAPI(unittest.TestCase):
             json={"mandate_id": "man_101", "failure_code": "NOT_A_CODE"},
         )
         self.assertEqual(response.status_code, 422)
+
+    def test_live_llm_requires_operator_auth(self):
+        # Unauthenticated request for live_llm must return 401
+        res_api = self.client.get("/api/results?live_llm=true")
+        self.assertEqual(res_api.status_code, 401)
+        res_page = self.client.get("/results?live_llm=true")
+        self.assertEqual(res_page.status_code, 401)
 
 
 if __name__ == "__main__":

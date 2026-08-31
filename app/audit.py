@@ -10,6 +10,7 @@ import contextvars
 import json
 import logging
 import os
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -25,17 +26,79 @@ _current_audit_dir: contextvars.ContextVar[Path | None] = contextvars.ContextVar
 _current_event_log: contextvars.ContextVar[Path | None] = contextvars.ContextVar("_current_event_log", default=None)
 
 
+# Set once if the project tree turns out to be read-only, so the warning is emitted a
+# single time rather than on every event.
+_ephemeral_dir: Path | None = None
+
+
+def ephemeral_fallback_active() -> bool:
+    """Whether the log has degraded to a directory that does not survive the process.
+
+    Surfaced on /health. A deployment writing its audit trail to scratch space is not an
+    error the debtor should see, but it is a fact an operator must be able to read off the
+    service rather than infer from missing rows.
+    """
+    return _ephemeral_dir is not None
+
+
+def _fallback_dir() -> Path:
+    """A writable directory, when the project tree is not one.
+
+    Serverless bundles the application read-only. Without this the append raises OSError
+    and the resolution page - the one surface a debtor actually sees - returns a 500 for a
+    write that is incidental to rendering it. Degrading is right, silence is not: this
+    warns, and `ephemeral_fallback_active` reports it on /health, because an audit log the
+    envelope reads back has genuinely lost data here. `DATABASE_URL` is the fix.
+    """
+    global _ephemeral_dir
+    if _ephemeral_dir is None:
+        _ephemeral_dir = Path(tempfile.gettempdir()) / "recovery-audit"
+        _ephemeral_dir.mkdir(parents=True, exist_ok=True)
+        logger.warning(
+            "audit directory %s is not writable; falling back to %s, which does not "
+            "survive this process. Decisions folded from this log will not see events "
+            "recorded by any other instance. Set DATABASE_URL for durable state.",
+            AUDIT_DIR,
+            _ephemeral_dir,
+        )
+    return _ephemeral_dir
+
+
 def get_audit_dir() -> Path:
     """Return the active audit directory, respecting task/context-local overrides."""
     val = _current_audit_dir.get()
-    return val if val is not None else AUDIT_DIR
+    if val is not None:
+        return val
+    if _ephemeral_dir is not None:
+        return _ephemeral_dir
+    return AUDIT_DIR
 
 
 def get_event_log() -> Path:
     """Return the active event log path, respecting task/context-local overrides."""
     val = _current_event_log.get()
-    return val if val is not None else EVENT_LOG
+    if val is not None:
+        return val
+    if _ephemeral_dir is not None:
+        return _ephemeral_dir / "events.jsonl"
+    return EVENT_LOG
 
+
+
+def _use_database() -> bool:
+    """Whether this call should read and write the durable store rather than the file.
+
+    A context-local override means an isolated run is in progress - the benchmark, or a
+    test - and those must never touch shared state: `/results` has to stay a pure function
+    of its seed, and a test that wrote decision rows into the real log would change every
+    later decision. So the override wins over `DATABASE_URL`, rather than the other way
+    round.
+    """
+    if _current_event_log.get() is not None or _current_audit_dir.get() is not None:
+        return False
+    from app import store
+
+    return store.is_enabled()
 
 
 def record(event: str, **fields: Any) -> dict[str, Any]:
@@ -45,9 +108,23 @@ def record(event: str, **fields: Any) -> dict[str, Any]:
         "event": event,
         **fields,
     }
+    if _use_database():
+        from app import store
+
+        store.append_event(json.loads(json.dumps(entry, ensure_ascii=False, default=str)))
+        return entry
     audit_dir = get_audit_dir()
     event_log = get_event_log()
-    audit_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        audit_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        # A read-only tree, which is what serverless bundles the application into. Only
+        # the unpinned path degrades: a context-local override belongs to an isolated run
+        # whose directory the caller created, so a failure there is a real bug.
+        if _current_audit_dir.get() is not None:
+            raise
+        audit_dir = _fallback_dir()
+        event_log = audit_dir / "events.jsonl"
     # One os.write of one already-assembled line, rather than a buffered TextIOWrapper
     # that is free to flush a line in two pieces. Two request threads append here
     # concurrently - the promise endpoint and the webhook both run in Starlette's
@@ -91,6 +168,10 @@ def read_all() -> list[dict[str, Any]]:
     The final-row skip is warned about rather than recorded: writing into the file being
     read would grow it on every read, and the reader is on the decision path.
     """
+    if _use_database():
+        from app import store
+
+        return store.read_events()
     event_log = get_event_log()
     if not event_log.exists():
         return []

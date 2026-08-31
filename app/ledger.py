@@ -85,15 +85,19 @@ def msmed_eligible(merchant: Merchant) -> tuple[bool, str]:
         return False, "supplier is not registered on Udyam, so MSMED s.15/16 does not apply"
     category = str(merchant.udyam_category or "").strip().lower()
     activity = str(merchant.udyam_activity.value if hasattr(merchant.udyam_activity, "value") else merchant.udyam_activity or "").strip().lower()
-    if category == "medium":
-        return False, "MSMED delayed payment provisions cover micro and small only, not medium"
-    if activity == "trading" or activity == UdyamActivity.TRADING.value:
+    if not category:
+        return False, "supplier Udyam enterprise category is missing; cannot verify micro/small eligibility"
+    if not activity:
+        return False, "supplier Udyam enterprise activity is missing; cannot verify manufacturing/services eligibility"
+    if category not in ("micro", "small"):
+        return False, f"MSMED delayed payment provisions cover micro and small only, not {merchant.udyam_category}"
+    if activity in ("trading", UdyamActivity.TRADING.value):
         return (
             False,
             "supplier is registered as a trader; traders are excluded from the MSMED "
             "delayed payment benefit and get priority sector lending benefits only",
         )
-    return True, f"supplier is a registered {merchant.udyam_category} enterprise in {merchant.udyam_activity}"
+    return True, f"supplier is a registered {category} enterprise in {activity}"
 
 
 LEDGER_FINGERPRINT = "7c1314468565fc3d"

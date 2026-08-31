@@ -48,6 +48,9 @@ PROHIBITED_COPY_PATTERNS = (
     "immediate disallowance today",
     "deduction is cancelled today",
     "tax penalty is applied immediately",
+    "account suspension",
+    "commercial account suspension",
+    "suspend your account",
 )
 
 

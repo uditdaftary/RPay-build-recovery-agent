@@ -16,7 +16,7 @@ import time
 from dataclasses import asdict
 from typing import Any
 
-from app import audit
+from app import audit, store
 from app.channels import dispatch_message
 from app.messages import DraftedMessage
 
@@ -26,19 +26,34 @@ _REVIEW_QUEUE: dict[str, list[dict[str, Any]]] = {}
 
 
 def set_kill_switch(active: bool) -> bool:
-    """Set the master kill switch state immediately across all pipeline dispatchers."""
+    """Set the master kill switch state immediately across all pipeline dispatchers.
+
+    Durable when a store is configured. "Turn off any agent at any time, one tap,
+    immediate" is a claim about the whole system, and a process global only ever turned off
+    the instance that happened to serve the request.
+    """
     global _KILL_SWITCH_ACTIVE
     with _OPERATOR_LOCK:
         _KILL_SWITCH_ACTIVE = active
+        if store.is_enabled():
+            store.set_kill_switch(active)
         audit.record(
             "system.kill_switch_activated" if active else "system.kill_switch_deactivated",
             timestamp=int(time.time()),
         )
-    return _KILL_SWITCH_ACTIVE
+    return active
 
 
 def is_kill_switch_active() -> bool:
-    """Check whether the master kill switch is currently engaged."""
+    """Check whether the master kill switch is currently engaged.
+
+    Reads the store first. Failing closed on a store error would halt every agent whenever
+    the database blinks; failing open would ignore an engaged switch. Neither is safe by
+    default, so the error is raised to the caller rather than guessed at - an operator
+    console that cannot reach its own state must say so.
+    """
+    if store.is_enabled():
+        return store.get_kill_switch()
     with _OPERATOR_LOCK:
         return _KILL_SWITCH_ACTIVE
 
@@ -83,7 +98,10 @@ def queue_for_review(
             "recipient_phone": phone,
             "queued_at": int(time.time()),
         }
-        _REVIEW_QUEUE.setdefault(debtor_id, []).append(item)
+        if store.is_enabled():
+            store.enqueue_review(debtor_id, item)
+        else:
+            _REVIEW_QUEUE.setdefault(debtor_id, []).append(item)
         audit.record(
             "operator.review_queued",
             debtor_id=debtor_id,
@@ -95,27 +113,43 @@ def queue_for_review(
 
 def get_review_queue() -> list[dict[str, Any]]:
     """Retrieve all items currently waiting in review-first mode."""
+    if store.is_enabled():
+        return store.list_review_queue()
     with _OPERATOR_LOCK:
         return [item for items in _REVIEW_QUEUE.values() for item in items]
 
 
+def _requeue(debtor_id: str, item: dict[str, Any]) -> None:
+    """Return a popped item to the head of its debtor's queue."""
+    if store.is_enabled():
+        store.requeue_review_item(debtor_id, item)
+        return
+    with _OPERATOR_LOCK:
+        _REVIEW_QUEUE.setdefault(debtor_id, []).insert(0, item)
+
+
 def approve_review_item(debtor_id: str) -> dict[str, Any] | None:
     """Approve a queued action and dispatch outbound communication immediately."""
-    with _OPERATOR_LOCK:
-        items = _REVIEW_QUEUE.get(debtor_id)
-        if not items:
+    # The kill switch is checked before anything is taken off the queue, so a halted agent
+    # leaves the queue exactly as it found it.
+    if is_kill_switch_active():
+        if not get_review_queue():
             return None
+        audit.record("operator.approval_blocked_by_kill_switch", debtor_id=debtor_id)
+        return {"approved": False, "error": "master kill switch is currently active"}
 
-        if _KILL_SWITCH_ACTIVE:
-            audit.record(
-                "operator.approval_blocked_by_kill_switch",
-                debtor_id=debtor_id,
-            )
-            return {"approved": False, "error": "master kill switch is currently active"}
-
-        item = items.pop(0)
-        if not items:
-            _REVIEW_QUEUE.pop(debtor_id, None)
+    if store.is_enabled():
+        item = store.pop_review_item(debtor_id)
+        if item is None:
+            return None
+    else:
+        with _OPERATOR_LOCK:
+            items = _REVIEW_QUEUE.get(debtor_id)
+            if not items:
+                return None
+            item = items.pop(0)
+            if not items:
+                _REVIEW_QUEUE.pop(debtor_id, None)
 
     from app.envelope import Channel, Language, Tone
 
@@ -137,6 +171,25 @@ def approve_review_item(debtor_id: str) -> dict[str, Any] | None:
         recipient_email=item.get("recipient_email"),
         recipient_phone=item.get("recipient_phone"),
     )
+    if not res.success:
+        # Put it back at the head of the queue. The pop above happens before the dispatch
+        # is attempted, so a transient failure - a 429, a network blip, a missing recipient -
+        # would otherwise delete a human-approved statutory notice with no way to retry.
+        # Head, not tail, because the queue is FIFO and this item was the oldest.
+        _requeue(debtor_id, item)
+        audit.record(
+            "operator.review_dispatch_failed",
+            debtor_id=debtor_id,
+            strategy=item["strategy"],
+            error=res.error,
+        )
+        return {
+            "approved": False,
+            "error": f"Dispatch failed: {res.error}",
+            "requeued": True,
+            "dispatch_result": asdict(res),
+        }
+
     audit.record(
         "operator.review_approved",
         debtor_id=debtor_id,
@@ -148,6 +201,19 @@ def approve_review_item(debtor_id: str) -> dict[str, Any] | None:
 
 def reject_review_item(debtor_id: str, reason: str = "Operator manual rejection") -> bool:
     """Reject a queued action and log the human decision reason."""
+    if store.is_enabled():
+        item = store.pop_review_item(debtor_id)
+        if item is None:
+            return False
+        audit.record(
+            "operator.review_rejected",
+            debtor_id=debtor_id,
+            strategy=item["strategy"],
+            reason=reason,
+            operator_reason=reason,
+        )
+        return True
+
     with _OPERATOR_LOCK:
         items = _REVIEW_QUEUE.get(debtor_id)
         if not items:
@@ -167,6 +233,12 @@ def reject_review_item(debtor_id: str, reason: str = "Operator manual rejection"
     return True
 
 
+def _sanitize_csv_cell(val: Any) -> Any:
+    if isinstance(val, str) and val and val[0] in ("=", "+", "-", "@", "\t", "\r"):
+        return f"'{val}"
+    return val
+
+
 def export_audit_events(format_type: str = "json") -> str:
     """Export complete append-only audit trail in JSON or CSV format."""
     events = audit.read_all()
@@ -182,7 +254,8 @@ def export_audit_events(format_type: str = "json") -> str:
         writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         for e in events:
-            writer.writerow(e)
+            sanitized_e = {k: _sanitize_csv_cell(v) for k, v in e.items()}
+            writer.writerow(sanitized_e)
         return output.getvalue()
 
     return json.dumps(events, indent=2, default=str)

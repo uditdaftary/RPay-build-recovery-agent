@@ -1,6 +1,8 @@
 import csv
 import io
+import os
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -19,6 +21,7 @@ from app.server import app
 
 class TestOperatorSurface(unittest.TestCase):
     def setUp(self):
+        os.environ["OPERATOR_API_KEY"] = "operator-secret-key"
         self.client = TestClient(app)
         self.client.headers["X-Operator-Key"] = "operator-secret-key"
         set_kill_switch(False)
@@ -50,6 +53,7 @@ class TestOperatorSurface(unittest.TestCase):
             body="Section 15 demand.",
             is_statutory=True,
             dark_pattern_clean=True,
+            recipient_email="finance@specialcorp.in",
         )
         queue_for_review(
             debtor_id="DEB-099",
@@ -58,6 +62,7 @@ class TestOperatorSurface(unittest.TestCase):
             ask_amount_paise=100000_00,
             reasoning="High exposure statutory notice",
             draft=msg,
+            recipient_email="finance@specialcorp.in",
         )
         queue = get_review_queue()
         self.assertTrue(any(item["debtor_id"] == "DEB-099" for item in queue))
@@ -135,6 +140,7 @@ class TestOperatorSurface(unittest.TestCase):
             body="Demand body.",
             is_statutory=True,
             dark_pattern_clean=True,
+            recipient_email="killtest@corp.in",
         )
         queue_for_review(
             debtor_id="DEB-KILL-01",
@@ -143,6 +149,7 @@ class TestOperatorSurface(unittest.TestCase):
             ask_amount_paise=75000_00,
             reasoning="Checking kill switch safety under lock",
             draft=msg,
+            recipient_email="killtest@corp.in",
         )
         # Activate kill switch
         set_kill_switch(True)
@@ -393,6 +400,53 @@ class TestOperatorSurface(unittest.TestCase):
             res_csv.headers.get("content-disposition"),
             'attachment; filename="audit_events.csv"',
         )
+
+    def test_unconfigured_operator_api_key_blocks_access(self):
+        with patch.dict(os.environ, {"OPERATOR_API_KEY": ""}):
+            unconfigured_client = TestClient(app)
+            unconfigured_client.headers["X-Operator-Key"] = "operator-secret-key"
+            res = unconfigured_client.get("/api/operator/queue")
+            self.assertEqual(res.status_code, 401)
+            res_html = unconfigured_client.get("/operator")
+            self.assertEqual(res_html.status_code, 401)
+
+    def test_csv_export_neutralizes_formula_injection(self):
+        from app.operator import export_audit_events
+        audit.record("test.formula", debtor_id="=cmd|' /C calc'!A0", reason="+2+2", other="@SUM(1,2)")
+        csv_out = export_audit_events("csv")
+        reader = csv.DictReader(io.StringIO(csv_out))
+        matching = [row for row in reader if row.get("event") == "test.formula"]
+        self.assertTrue(len(matching) >= 1)
+        row = matching[0]
+        self.assertEqual(row["debtor_id"], "'=cmd|' /C calc'!A0")
+        self.assertEqual(row["reason"], "'+2+2")
+        self.assertEqual(row["other"], "'@SUM(1,2)")
+
+    def test_approve_review_item_handles_dispatch_failure(self):
+        from app.operator import approve_review_item, queue_for_review
+        draft = DraftedMessage(
+            debtor_id="DEB-FAIL-DISPATCH",
+            channel=Channel.EMAIL,
+            language=Language.EN,
+            tone=Tone.FORMAL,
+            subject="Test Notice",
+            body="Test notice body",
+            is_statutory=True,
+            dark_pattern_clean=True,
+            recipient_email=None,  # No recipient email -> dispatch will fail
+        )
+        queue_for_review(
+            debtor_id="DEB-FAIL-DISPATCH",
+            debtor_name="Fail Corp",
+            strategy="ESCALATE",
+            ask_amount_paise=1000_00,
+            reasoning="Testing failure",
+            draft=draft,
+            recipient_email=None,
+        )
+        res = approve_review_item("DEB-FAIL-DISPATCH")
+        self.assertFalse(res["approved"])
+        self.assertIn("Dispatch failed", res["error"])
 
 
 if __name__ == "__main__":
