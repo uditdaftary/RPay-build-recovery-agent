@@ -38,6 +38,22 @@ def get_event_log() -> Path:
 
 
 
+def _use_database() -> bool:
+    """Whether this call should read and write the durable store rather than the file.
+
+    A context-local override means an isolated run is in progress - the benchmark, or a
+    test - and those must never touch shared state: `/results` has to stay a pure function
+    of its seed, and a test that wrote decision rows into the real log would change every
+    later decision. So the override wins over `DATABASE_URL`, rather than the other way
+    round.
+    """
+    if _current_event_log.get() is not None or _current_audit_dir.get() is not None:
+        return False
+    from app import store
+
+    return store.is_enabled()
+
+
 def record(event: str, **fields: Any) -> dict[str, Any]:
     """Append one event and return it. Never raises on serialisation of odd values."""
     entry = {
@@ -45,6 +61,11 @@ def record(event: str, **fields: Any) -> dict[str, Any]:
         "event": event,
         **fields,
     }
+    if _use_database():
+        from app import store
+
+        store.append_event(json.loads(json.dumps(entry, ensure_ascii=False, default=str)))
+        return entry
     audit_dir = get_audit_dir()
     event_log = get_event_log()
     audit_dir.mkdir(parents=True, exist_ok=True)
@@ -91,6 +112,10 @@ def read_all() -> list[dict[str, Any]]:
     The final-row skip is warned about rather than recorded: writing into the file being
     read would grow it on every read, and the reader is on the decision path.
     """
+    if _use_database():
+        from app import store
+
+        return store.read_events()
     event_log = get_event_log()
     if not event_log.exists():
         return []

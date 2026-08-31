@@ -29,7 +29,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, field_validator
 
-from app import audit, config, razorpay_gateway
+from app import audit, config, razorpay_gateway, store
 from app.config import PROJECT_ROOT, business_today
 from app.contact_history import MAX_PROMISE_WINDOWS_WITHOUT_SETTLEMENT
 from app.disputes import (
@@ -219,7 +219,14 @@ def format_inr(paise: int) -> str:
     return f"{digits}.{remainder:02d}"
 
 
+def _lookup_invoice(token: str) -> dict | None:
+    """An invoice with its durable lifecycle folded in. The only way to read INVOICES."""
+    _hydrate_invoices()
+    return INVOICES.get(token)
+
+
 def _find_invoice(order_id: str) -> tuple[str, dict] | tuple[None, None]:
+    _hydrate_invoices()
     for token, invoice in INVOICES.items():
         if order_id in invoice.get("razorpay_order_ids", ()):
             return token, invoice
@@ -231,6 +238,47 @@ def _find_invoice(order_id: str) -> tuple[str, dict] | tuple[None, None]:
 # without this, both could read "not yet processed" before either records it, double
 # crediting one payment.
 _SETTLEMENT_LOCK = threading.Lock()
+
+
+# The fields `INVOICES` mutates at runtime. Everything else on an invoice comes from
+# data/ledger.json and never changes, because the ledger is the experiment's seed and has
+# to stay byte-identical - so only these are written to the durable store.
+RUNTIME_INVOICE_FIELDS = (
+    "status",
+    "amount_received_paise",
+    "promised_date",
+    "promised_amount_paise",
+    "promise_windows",
+    "processed_payment_ids",
+    "razorpay_order_ids",
+    "dispute_reason",
+    "dispute_category",
+    "evidence_required",
+    "statutory_clock_suspended",
+)
+
+
+def _persist_invoice(invoice: dict) -> None:
+    """Write one invoice's runtime lifecycle to the store, if there is one."""
+    if not store.is_enabled():
+        return
+    state = {k: invoice[k] for k in RUNTIME_INVOICE_FIELDS if k in invoice}
+    store.save_invoice_runtime(invoice["invoice_id"], state)
+
+
+def _hydrate_invoices() -> None:
+    """Fold the durable lifecycle back over the ledger-derived view.
+
+    `INVOICES` is process memory, and on serverless the instance that serves the payment
+    is rarely the one that served the page. Without this a settlement recorded by the
+    webhook is invisible to the next request and the debtor keeps being chased.
+    """
+    if not store.is_enabled():
+        return
+    for invoice_id, state in store.load_invoice_runtime().items():
+        invoice = INVOICES.get(invoice_id)
+        if invoice is not None:
+            invoice.update(state)
 
 
 def suppress_on_settlement(token: str, invoice: dict, payment_id: str, amount_paise: int) -> None:
@@ -247,7 +295,16 @@ def suppress_on_settlement(token: str, invoice: dict, payment_id: str, amount_pa
     """
     with _SETTLEMENT_LOCK:
         processed = invoice.setdefault("processed_payment_ids", [])
-        if payment_id in processed or invoice["status"] == "PAID":
+        # The replay guard. In one process the list plus the lock is enough; across
+        # serverless instances neither is shared, so the database decides instead and the
+        # conditional insert is the lock. `claim_payment` returns False when this capture
+        # has already been applied by any instance.
+        already_seen = (
+            not store.claim_payment(invoice["invoice_id"], payment_id)
+            if store.is_enabled()
+            else payment_id in processed
+        )
+        if already_seen or invoice["status"] == "PAID":
             audit.record(
                 "settlement.duplicate_ignored",
                 invoice_id=invoice["invoice_id"],
@@ -261,6 +318,7 @@ def suppress_on_settlement(token: str, invoice: dict, payment_id: str, amount_pa
 
         if remaining > 0:
             invoice["status"] = str(InvoiceState.PARTIALLY_PAID)
+            _persist_invoice(invoice)
             audit.record(
                 "settlement.partial",
                 invoice_id=invoice["invoice_id"],
@@ -274,6 +332,7 @@ def suppress_on_settlement(token: str, invoice: dict, payment_id: str, amount_pa
             return
 
         invoice["status"] = "PAID"
+        _persist_invoice(invoice)
         audit.record(
             "settlement.confirmed",
             invoice_id=invoice["invoice_id"],
@@ -308,7 +367,7 @@ def index(request: Request) -> HTMLResponse:
 
 @app.get("/r/{token}", response_class=HTMLResponse)
 def resolution_page(request: Request, token: str) -> HTMLResponse:
-    invoice = INVOICES.get(token)
+    invoice = _lookup_invoice(token)
     if invoice is None:
         return HTMLResponse("<h1>This link is not valid.</h1>", status_code=404)
 
@@ -345,7 +404,7 @@ class CreateOrderRequest(BaseModel):
 
 @app.post("/api/create-order")
 def create_order(body: CreateOrderRequest) -> JSONResponse:
-    invoice = INVOICES.get(body.token)
+    invoice = _lookup_invoice(body.token)
     if invoice is None:
         return JSONResponse({"error": "unknown token"}, status_code=404)
 
@@ -388,6 +447,9 @@ def create_order(body: CreateOrderRequest) -> JSONResponse:
         return JSONResponse({"error": "could not reach the payment gateway"}, status_code=502)
 
     invoice.setdefault("razorpay_order_ids", []).append(order["id"])
+    # Persisted so the webhook can match this order back to its invoice even when the
+    # capture is delivered to a different instance than the one that created the order.
+    _persist_invoice(invoice)
     audit.record(
         "order.created",
         invoice_id=invoice["invoice_id"],
@@ -499,7 +561,7 @@ class PromiseRequest(BaseModel):
 
 @app.post("/api/promise")
 def record_promise(body: PromiseRequest) -> JSONResponse:
-    invoice = INVOICES.get(body.token)
+    invoice = _lookup_invoice(body.token)
     if invoice is None:
         return JSONResponse({"error": "unknown token"}, status_code=404)
     blocked = _mutation_blocked(invoice)
@@ -561,6 +623,7 @@ def record_promise(body: PromiseRequest) -> JSONResponse:
     invoice["status"] = "PROMISED"
     invoice["promised_date"] = body.promised_date.isoformat()
     invoice["promised_amount_paise"] = amount
+    _persist_invoice(invoice)
 
     audit.record(
         "promise.made",
@@ -584,7 +647,7 @@ class DisputeRequest(BaseModel):
 
 @app.post("/api/dispute")
 def raise_dispute(body: DisputeRequest) -> JSONResponse:
-    invoice = INVOICES.get(body.token)
+    invoice = _lookup_invoice(body.token)
     if invoice is None:
         return JSONResponse({"error": "unknown token"}, status_code=404)
     blocked = _mutation_blocked(invoice, allow_disputed=True)
@@ -621,6 +684,7 @@ def raise_dispute(body: DisputeRequest) -> JSONResponse:
     invoice["dispute_category"] = category.value
     invoice["evidence_required"] = evidence
     invoice["statutory_clock_suspended"] = statutory_clock_suspended
+    _persist_invoice(invoice)
 
     audit.record(
         "dispute.raised",
