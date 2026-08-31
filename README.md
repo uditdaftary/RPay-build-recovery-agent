@@ -1,12 +1,13 @@
 # B2B Receivables Recovery Agent
 
-[![CI / Test Suite](https://img.shields.io/badge/tests-124%20passed-brightgreen.svg)](file:///test_decisions.py)
+[![CI / Test Suite](https://img.shields.io/badge/tests-155%20passed-brightgreen.svg)](file:///test_decisions.py)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688.svg)](https://fastapi.tiangolo.com/)
 [![Razorpay API](https://img.shields.io/badge/Razorpay-REST%20%26%20Webhooks-0C2340.svg)](https://razorpay.com/)
+[![Durable Store](https://img.shields.io/badge/Postgres-ConnectionPool%20%2B%20JSONB-336791.svg)](file:///app/store.py)
 [![Compliance](https://img.shields.io/badge/Compliance-MSMED%20s.15%2F16%20%2B%2043B(h)-navy.svg)](file:///app/statute.py)
 
-An autonomous, legally grounded, and relationship-aware B2B receivables recovery agent built on Razorpay APIs, India statutory frameworks (MSMED Act 2006 & Section 43B(h)), and Gemini AI reasoning.
+An autonomous, legally grounded, and relationship-aware B2B receivables recovery agent built on Razorpay APIs, India statutory frameworks (MSMED Act 2006 & Section 43B(h)), durable PostgreSQL persistence, and Gemini AI reasoning.
 
 ---
 
@@ -17,8 +18,9 @@ Indian Micro and Small Enterprises (MSMEs) face severe working-capital stress, w
 2. **Double-bill compliant buyers** who legitimately withheld Tax Deducted at Source (TDS) or paid off-rail via NEFT/RTGS.
 3. **Harm suppliers legally** by unlawfully asserting MSMED statutory penalties on ineligible categories (such as trading enterprises).
 4. **Continue chasing after settlement** due to fragmented payment systems without real-time suppression.
+5. **Lose state across serverless invocations** where ephemeral containers forget promises, drop audit trails, or isolate operator kill switches.
 
-The **B2B Receivables Recovery Agent** solves this with a two-stage decision architecture: a hard deterministic policy envelope that guarantees zero-harassment and statutory compliance, paired with an AI strategist that adapts tone, timing, and channels per debtor account.
+The **B2B Receivables Recovery Agent** solves this with a two-stage decision architecture: a hard deterministic policy envelope that guarantees zero-harassment and statutory compliance, paired with an AI strategist that adapts tone, timing, and channels per debtor account, backed by durable multi-tenant persistence.
 
 ---
 
@@ -27,12 +29,21 @@ The **B2B Receivables Recovery Agent** solves this with a two-stage decision arc
 - **Two-Stage Safety Architecture:**
   - *Stage 1: Deterministic Policy Envelope (`app/envelope.py`)* — 11 hard rules enforcing opt-out suppression, active dispute halts, MSMED trader refusal, Form 26AS TDS reconciliation, 7-day contact cooldowns, and financial concession bounding.
   - *Stage 2: AI Recovery Strategist (`app/strategist.py`)* — Contextual reasoning evaluating debtor payment history, promise reliability, relationship tenure, and invoice aging.
+- **Durable PostgreSQL State Management (`app/store.py`):**
+  - Owns state that must outlive ephemeral request lifecycles: append-only audit events (`audit_events`), mutable invoice lifecycle (`invoice_runtime`), master kill switch (`operator_state`), and the operator review queue (`review_queue`).
+  - Idempotent settlement claims enforced in SQL schema (`INSERT ... WHERE NOT EXISTS`), preventing duplicate credits across concurrent serverless instances.
+  - Transparent dual-mode: automatically active when `DATABASE_URL` is set; cleanly falls back to hermetic filesystem/in-memory mode when unset.
+  - Isolated benchmark runs (`with isolated_audit_log():`) keep evaluations pure and deterministic without mutating live databases.
+- **Controlled Email Actuator behind Delivery Allowlist (`app/contacts.py`, `app/channels.py`):**
+  - Live email delivery via Resend API (`SEND_MODE=live`) guarded by strict allowlist checking (`ALLOWED_RECIPIENT`).
+  - Automatic recipient redirection with visible audit banners so dunning notices never reach unintended third parties during evaluation.
+  - Local sandbox outbox fallback (`runs/outbox/`) when unconfigured or running offline.
 - **Instant Webhook Suppression-on-Settlement (`app/server.py`):**
   - Consumes Razorpay `payment.captured` webhooks with raw-byte HMAC-SHA256 signature verification.
   - Thread-safe idempotent capture processing halts the recovery ladder in real time.
 - **India MSMED Statutory Engine (`app/statute.py`, `app/disputes.py`):**
   - Calculates Section 15 statutory due dates (15-day deemed acceptance / 45-day written contract cap).
-  - Enforces Section 16 compound monthly penal interest (3× RBI bank rate = 20.25% p.a.).
+  - Enforces Section 16 compound monthly penal interest (3× RBI bank rate = 20.25% p.a.) calculated per invoice from its individual acceptance clock.
   - Couples with Section 43B(h) of the Income Tax Act for constructive, non-adversarial reminders.
   - Dynamically resets statutory clocks when valid written objections are lodged within 15 days of delivery.
 - **Multi-Door Debtor Resolution Surface (`/r/{invoice_id}`):**
@@ -40,9 +51,9 @@ The **B2B Receivables Recovery Agent** solves this with a two-stage decision arc
   - **Door 2 (Promise):** Structured Promise-to-Pay (PTP) commitment date selection (suppresses chasing until due).
   - **Door 3 (Dispute):** Structured objection submission with evidentiary requirements (halts ladder, routes to human triage).
 - **Human Operator Surface & Master Kill Switch (`app/operator.py`, `/operator`):**
-  - Real-time Master Kill Switch to instantly halt all automated outbound communications.
-  - Review-First Mode queue for high-stakes decisions (statutory notices, significant concessions).
-  - Tamper-evident append-only JSONL audit trail with JSON/CSV export.
+  - Real-time Master Kill Switch to instantly halt all automated outbound communications across instances.
+  - Review-First Mode queue for high-stakes decisions (statutory notices, significant concessions) with requeue protection on dispatch failure.
+  - Tamper-evident append-only audit trail with JSON and sanitized CSV export (formula injection protected).
 - **Evaluation & Counterfactual Benchmark (`run_experiment.py`, `/results`):**
   - Deterministic evaluation harness comparing AI Agent vs Calendar Baseline policy across portfolio metrics, strategy distribution, and 8 debtor archetypes.
 
@@ -84,6 +95,12 @@ Configure the following variables:
 | `LLM_MODEL` | Primary AI Strategist model | `gemini-3.6-flash` |
 | `LLM_FALLBACK_MODELS` | Failover model hierarchy | `gemini-3.5-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite` |
 | `OPERATOR_API_KEY` | Operator console access key | `operator-secret-key` |
+| `DATABASE_URL` | PostgreSQL connection string for durable state | Neon / Supabase / Postgres (optional) |
+| `STORE_TEST_DATABASE_URL` | Isolated test DB for destructive store checks | Local docker postgres (optional) |
+| `SEND_MODE` | Email dispatch mode (`sandbox` or `live`) | `sandbox` |
+| `RESEND_API_KEY` | Resend API key for live email actuation | https://resend.com (optional) |
+| `ALLOWED_RECIPIENT` | Single allowlisted destination email address | Developer test address |
+| `FROM_EMAIL` | Outbound sender address | `recovery@msme-agent.in` |
 
 ---
 
@@ -156,9 +173,9 @@ python verify_all.py
 ```
 
 Runs all 5 validation gates:
-1. **Unit Test Suite:** 124+ automated tests covering signature cryptography, statutory calculations, envelope guardrails, and message generation.
+1. **Unit Test Suite:** 155+ automated tests covering signature cryptography, statutory calculations, envelope guardrails, durable state, and message generation.
 2. **Ruff Lint & Formatting:** Strict codebase linting and datetime timezone safety.
-3. **Ledger Determinism:** SHA-256 fingerprint verification against seed 42.
+3. **Ledger Determinism:** SHA-256 fingerprint verification against seed 42 (`7c1314468565fc3d`).
 4. **Benchmark Reproducibility:** End-to-end execution of `run_experiment.py`.
 5. **Hygiene & Leak Scanner:** Zero private planning document leaks or hardcoded secrets.
 
@@ -168,6 +185,9 @@ To run individual test suites:
 # Run all unit tests
 python -m pytest
 
+# Run durable persistence tests (requires STORE_TEST_DATABASE_URL)
+python -m pytest test_store.py
+
 # Run cryptography & signature verification tests
 python test_signatures.py
 
@@ -176,6 +196,12 @@ python -m pytest test_statute.py
 
 # Run policy envelope & decision tests
 python -m pytest test_decisions.py
+
+# Run operator console & kill switch tests
+python -m pytest test_operator.py
+
+# Run benchmark API & results UI tests
+python -m pytest test_results_ui.py
 
 # Run repository hygiene scanner
 python -m pytest test_hygiene.py
@@ -187,13 +213,18 @@ python -m pytest test_hygiene.py
 
 ```
 recovery-agent/
+├── api/
+│   └── index.py             # Serverless ASGI entrypoint for hosted deployment
 ├── app/
 │   ├── config.py            # Environment settings and business calendar
+│   ├── store.py             # Durable PostgreSQL persistence layer (audit, runtime, operator, queue)
+│   ├── contacts.py          # Debtor contact resolution & delivery allowlist enforcement
 │   ├── ledger.py            # Synthetic ledger generator, empirical BehaviourParams, fingerprint
 │   ├── envelope.py          # Stage 1: Deterministic policy envelope & 11 guardrails
 │   ├── strategist.py        # Stage 2: AI Recovery Strategist per-debtor decision engine
 │   ├── messages.py          # Stage 3: Outbound copy drafting & anti-dark-pattern filter
-│   ├── channels.py          # Channel dispatchers (Email, WhatsApp, Portal stubs)
+│   ├── channels.py          # Multi-channel dispatchers (Resend Email, WhatsApp, Portal)
+│   ├── pipeline.py          # End-to-end batch recovery pipeline orchestration
 │   ├── statute.py           # MSMED s.15/16 penal interest & Section 43B(h) calculator
 │   ├── disputes.py          # Dispute categorization & statutory clock recomputation
 │   ├── contact_history.py   # Debtor contact intensity, cooldowns, and open PTP tracking
@@ -202,12 +233,15 @@ recovery-agent/
 │   ├── mandate.py           # Mandate retry sequencer stub & failure categorization
 │   ├── razorpay_gateway.py  # Razorpay REST client & signature verification
 │   ├── llm.py               # Google GenAI client with multi-model failover chain
-│   ├── audit.py             # Append-only JSONL event logging
+│   ├── audit.py             # Append-only event logging (Postgres or single-syscall JSONL)
+│   ├── hygiene.py           # Single source of truth for secret & leak scanning
 │   ├── server.py            # FastAPI application, webhooks, debtor resolution & results routes
 │   └── templates/           # Jinja2 templates (index, resolution, operator, results)
 ├── data/
 │   └── ledger.json          # Seeded synthetic receivables ledger
 ├── ARCHITECTURE.md          # Exhaustive technical systems architecture documentation
+├── bugs.md                  # Comprehensive running defect ledger & audit log
+├── vercel.json              # Serverless build and routing configuration
 ├── run_experiment.py        # Benchmark harness & comparative evaluation runner
 ├── verify_all.py            # 5-gate pre-submission verification script
 ├── test_hygiene.py          # Secret & private document leak scanner
@@ -215,8 +249,13 @@ recovery-agent/
 ├── test_decisions.py        # Decision engine & envelope tests
 ├── test_statute.py          # MSMED & statutory calculation tests
 ├── test_channels.py         # Communication channel tests
+├── test_messages.py         # Message drafting & anti-dark-pattern tests
+├── test_pipeline.py         # End-to-end pipeline orchestration tests
 ├── test_operator.py         # Operator console & kill switch tests
+├── test_store.py            # Durable PostgreSQL integration checks
 ├── test_results_ui.py       # Benchmark API & results UI tests
+├── test_mandate.py          # Mandate retry sequence tests
+├── test_challenges.py       # Adversarial challenge & boundary stress tests
 ├── pyproject.toml           # Project metadata & ruff configuration
 └── requirements.txt         # Production dependencies
 ```
