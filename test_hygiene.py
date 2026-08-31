@@ -1,44 +1,18 @@
 """Hygiene and secret leak verification test.
 
-Ensures no private planning documents, internal scratchpad files, or raw secrets
-are referenced across any public repository files in `recovery-agent/`.
+Ensures no private planning documents or internal scratchpad files are referenced across
+any public repository file. The scan itself lives in `app/hygiene.py` so this test and
+`verify_all.py` Gate 5 cannot enforce different rules.
 """
 
 import unittest
-from pathlib import Path
+
+from app.hygiene import scan_for_private_references
 
 
 class TestRepositoryHygiene(unittest.TestCase):
-    def setUp(self) -> None:
-        self.repo_dir = Path(__file__).parent.resolve()
-        self.prohibited_terms = [
-            "Product.md",
-            "strategy-verdict",
-            "openitems",
-            "CLAUDE.md",
-            "plan-day-",
-            "razorpay-buildathon-timeline",
-        ]
-
     def test_no_private_strategy_references(self) -> None:
-        scanned_suffixes = {".py", ".md", ".html", ".json", ".toml", ".txt"}
-        files_to_scan = [
-            p
-            for p in self.repo_dir.rglob("*")
-            if p.is_file()
-            and p.suffix in scanned_suffixes
-            and p.name not in ("test_hygiene.py", "verify_all.py")
-            and not any(part.startswith((".", "__pycache__", "venv")) for part in p.parts)
-        ]
-
-        leaks: list[str] = []
-        for file_path in files_to_scan:
-            content = file_path.read_text(encoding="utf-8", errors="ignore")
-            for term in self.prohibited_terms:
-                if term in content:
-                    rel_path = file_path.relative_to(self.repo_dir)
-                    leaks.append(f"{rel_path}: contains forbidden reference '{term}'")
-
+        leaks = scan_for_private_references()
         self.assertEqual(
             len(leaks),
             0,

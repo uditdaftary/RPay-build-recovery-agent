@@ -20,3 +20,4 @@ audit/*.jsonl
 .worktrees/
 context.md
 .DS_Store
+CLAUDE.md
