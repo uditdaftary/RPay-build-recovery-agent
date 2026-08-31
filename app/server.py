@@ -35,12 +35,14 @@ from app.disputes import (
     classify_dispute_reason,
     recompute_statutory_dates_on_dispute,
 )
-from app.ledger import InvoiceState
+from app.envelope import Strategy
+from app.ledger import InvoiceState, generate
 from app.ledger import balance_paise as _balance_paise
 from app.mandate import (
     MandateFailureCode,
     plan_mandate_retries,
 )
+from app.messages import draft_message_for_decision
 from app.operator import (
     approve_review_item,
     export_audit_events,
@@ -49,6 +51,7 @@ from app.operator import (
     reject_review_item,
     set_kill_switch,
 )
+from run_experiment import isolated_audit_log, run_experiment
 
 DISPUTE_EVIDENCE_MAP: dict[DisputeCategory, str] = {
     DisputeCategory.GOODS_SERVICES: "Inspection Report / Lorry Receipt (LR) Copy / Damage Photos",
@@ -653,15 +656,14 @@ def raise_dispute(body: DisputeRequest) -> JSONResponse:
 
 class MandateWebhookSimulateRequest(BaseModel):
     mandate_id: str
-    failure_code: str
+    failure_code: MandateFailureCode
     failure_date: date | None = None
 
 
 @app.post("/api/mandate/simulate-webhook")
 def simulate_mandate_webhook(body: MandateWebhookSimulateRequest) -> JSONResponse:
     f_date = body.failure_date or business_today()
-    code = MandateFailureCode(body.failure_code)
-    plan = plan_mandate_retries(body.mandate_id, code, f_date)
+    plan = plan_mandate_retries(body.mandate_id, body.failure_code, f_date)
     return JSONResponse(
         {
             "ok": True,
@@ -716,7 +718,7 @@ def operator_dashboard(request: Request) -> HTMLResponse:
     """Render operator dashboard with live kill switch and review queue."""
     expected = os.getenv("OPERATOR_API_KEY", "operator-secret-key")
     key = _extract_operator_key(request)
-    if not key or key != expected:
+    if not key or not hmac.compare_digest(key, expected):
         return HTMLResponse(
             "<h1>401 Unauthorized</h1><p>Invalid or missing operator credentials.</p>",
             status_code=401,
@@ -781,6 +783,209 @@ def export_audit_log(
     media_type = "application/json" if format.lower() == "json" else "text/csv"
     headers = {"Content-Disposition": f'attachment; filename="audit_events.{format.lower()}"'}
     return Response(content=exported, media_type=media_type, headers=headers)
+
+
+# ---------------------------------------------------------------------------
+# Results & Benchmark Evaluation Endpoints
+# ---------------------------------------------------------------------------
+
+ARCHETYPE_DETAILS: dict[int, dict[str, str]] = {
+    1: {
+        "archetype": "TDS Deducted (Form 26AS Reconciliation)",
+        "debtor_profile": "Deducted 10% TDS under Section 194C/J and remitted net balance. Regular commercial account.",
+        "why_baseline_erred": "Blindly treated the statutory TDS withholding shortfall as a delinquent default and issued an aggressive escalation notice demanding unowed money.",
+        "why_agent_won": "Recognized legitimate tax withholding, suppressed debt collection dunning, and requested Form 26AS certificate for seamless accounting reconciliation without friction.",
+    },
+    2: {
+        "archetype": "Off-Rail NEFT Payment (UTR Verification)",
+        "debtor_profile": "Paid full invoice balance via offline direct NEFT/RTGS bank transfer with UTR submitted.",
+        "why_baseline_erred": "Missed direct bank credit because funds bypassed payment link; escalated and threatened legal action against an already settled customer.",
+        "why_agent_won": "Flagged UTR reference on record, initiated banking ledger reconciliation, and avoided humiliating double-billing of a good payer.",
+    },
+    3: {
+        "archetype": "Active Dispute (Dispute Triage & MSMED Clock Reset)",
+        "debtor_profile": "Raised formal goods/service quality objection within 15-day statutory objection window under MSMED Section 15.",
+        "why_baseline_erred": "Escalated demand notice with statutory compound penal interest despite open dispute, violating MSMED Section 15 deemed acceptance rules.",
+        "why_agent_won": "Suspended statutory interest clock, paused collection chasing, and routed objection to human dispute triage with structured evidence checklist.",
+    },
+    4: {
+        "archetype": "Trader Merchant Refusal (MSMED Exclusion)",
+        "debtor_profile": "Supplier is a registered retail/wholesale trader (NIC 45-47), strictly ineligible for MSMED Section 15/16 benefits.",
+        "why_baseline_erred": "Unlawfully threatened MSMED Section 15/16 3x RBI compound penal interest and Section 43B(h) tax disallowance on behalf of a non-manufacturing trader.",
+        "why_agent_won": "Strictly enforced statutory eligibility bounds, refused unlawful legal threats, and calibrated communication to a firm commercial collection notice.",
+    },
+    5: {
+        "archetype": "VIP Relationship Protection (<5% Exposure)",
+        "debtor_profile": "Strategic enterprise buyer with ₹8.4 Cr annual turnover and <5% portfolio exposure. Minor invoice timing friction.",
+        "why_baseline_erred": "Applied rigid calendar dunning ladder and sent abrasive escalation notice, jeopardizing multi-crore enterprise contract over minor timing friction.",
+        "why_agent_won": "Policy envelope enforced VIP relationship protection, barring abrasive dunning and routing to polite collaborative reconciliation.",
+    },
+    6: {
+        "archetype": "Opt-Out Debtor (Zero-Harassment Compliance)",
+        "debtor_profile": "Registered explicit opt-out request under DPDP / TRAI commercial communication regulations.",
+        "why_baseline_erred": "Repeatedly spammed debtor with automated WhatsApp and email demands, committing direct regulatory compliance violations.",
+        "why_agent_won": "Enforced immediate, permanent contact suppression (WAIT with 0 touches), maintaining complete regulatory compliance.",
+    },
+    7: {
+        "archetype": "Reliable Late Payer (Restraint over Noise)",
+        "debtor_profile": "Habitual late payer (avg ~5 days late) with 7 of 7 promises kept; 100% historical settlement record.",
+        "why_baseline_erred": "Sent premature intrusive dunning reminders on Day 30, generating unnecessary noise and annoying a loyal paying client.",
+        "why_agent_won": "Exercised intelligent WAIT restraint, trusting debtor's verified payment cycle and achieving zero-touch recovery without friction.",
+    },
+    8: {
+        "archetype": "Complex Mixed-State Account (Human Handoff)",
+        "debtor_profile": "3+ open invoices across conflicting states (dispute + partial payment + overdue) with low promise reliability.",
+        "why_baseline_erred": "Applied generic single-invoice escalation rule blind to composite account complexity, risking litigation.",
+        "why_agent_won": "Recognized aggregate ambiguity exceeded autonomous confidence threshold and safely routed to human credit specialist (HUMAN_HANDOFF).",
+    },
+}
+
+
+def get_results_data(
+    seed: int = 42,
+    as_of: str = "2026-08-26",
+    live_llm: bool = False,
+) -> dict[str, object]:
+    """Execute evaluation run and return enriched benchmark results."""
+    with isolated_audit_log():
+        exp = run_experiment(seed=seed, as_of=as_of, live_llm=live_llm)
+
+        ledger = generate(seed=seed)
+        if as_of:
+            ledger["as_of"] = as_of
+
+        debtors_by_id = {d["debtor_id"]: d for d in ledger["debtors"]}
+        merchants_by_id = {m["merchant_id"]: m for m in ledger["merchants"]}
+        invoices_by_debtor: dict[str, list[dict]] = {}
+        for inv in ledger["invoices"]:
+            invoices_by_debtor.setdefault(inv["debtor_id"], []).append(inv)
+
+        as_of_date = date.fromisoformat(exp.as_of) if exp.as_of else business_today()
+        agent_by_id = {d.debtor_id: d for d in exp.agent_decisions}
+
+        enriched_matrix: list[dict[str, object]] = []
+        for item in exp.adjudication_matrix:
+            c_id = item.get("case_id", 1)
+            d_id = item["debtor_id"]
+            debtor = debtors_by_id.get(d_id, {})
+            merchant = merchants_by_id.get(
+                debtor.get("merchant_id"),
+                {"merchant_id": "UNKNOWN", "name": "Supplier", "udyam_registered": False},
+            )
+            invoices = invoices_by_debtor.get(d_id, [])
+
+            agent_dec = agent_by_id.get(d_id)
+            copy_preview = None
+            if agent_dec and agent_dec.strategy not in (Strategy.WAIT, Strategy.HUMAN_HANDOFF):
+                draft = draft_message_for_decision(
+                    decision=agent_dec,
+                    debtor=debtor,
+                    invoices=invoices,
+                    merchant=merchant,
+                    as_of=as_of_date,
+                )
+                copy_preview = {
+                    "subject": draft.subject,
+                    "body": draft.body,
+                    "channel": draft.channel.value if hasattr(draft.channel, "value") else str(draft.channel),
+                    "language": draft.language.value if hasattr(draft.language, "value") else str(draft.language),
+                    "tone": draft.tone.value if hasattr(draft.tone, "value") else str(draft.tone),
+                    "is_statutory": draft.is_statutory,
+                    "dark_pattern_clean": draft.dark_pattern_clean,
+                }
+
+            details = ARCHETYPE_DETAILS.get(c_id, {})
+            enriched_matrix.append({
+                **item,
+                "archetype": details.get("archetype", item.get("case_name")),
+                "debtor_profile": details.get("debtor_profile", ""),
+                "why_baseline_erred": details.get("why_baseline_erred", ""),
+                "why_agent_won": details.get("why_agent_won", ""),
+                "drafted_copy_preview": copy_preview,
+            })
+
+        return {
+            "seed": exp.seed,
+            "as_of": exp.as_of,
+            "is_live_llm": exp.is_live_llm,
+            "portfolio": {
+                "total_book_value_paise": exp.portfolio.total_book_value_paise,
+                "total_book_value_inr": exp.portfolio.book_value_inr,
+                "total_naive_outstanding_paise": exp.portfolio.total_naive_outstanding_paise,
+                "total_naive_outstanding_inr": exp.portfolio.naive_outstanding_inr,
+                "total_collectible_paise": exp.portfolio.total_collectible_paise,
+                "total_collectible_inr": exp.portfolio.collectible_inr,
+                "total_debtors": exp.portfolio.total_debtors,
+                "total_invoices": exp.portfolio.total_invoices,
+            },
+            "strategy_distribution": {
+                "agent": exp.comparative_metrics.get("agent_distribution", {}),
+                "baseline": exp.comparative_metrics.get("baseline_distribution", {}),
+            },
+            "comparative_metrics": exp.comparative_metrics,
+            "adjudication_matrix": enriched_matrix,
+        }
+
+
+@app.get("/api/results")
+def get_api_results(
+    seed: int = 42,
+    as_of: str = "2026-08-26",
+    live_llm: bool = False,
+) -> JSONResponse:
+    """Return complete benchmark evaluation dataset in JSON format."""
+    try:
+        if as_of:
+            date.fromisoformat(as_of)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid as_of date parameter: {exc}") from exc
+
+    try:
+        data = get_results_data(seed=seed, as_of=as_of, live_llm=live_llm)
+        return JSONResponse(data)
+    except Exception as exc:
+        logger.exception("Failed to compute benchmark results: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/results", response_class=HTMLResponse)
+def results_page(
+    request: Request,
+    seed: int = 42,
+    as_of: str = "2026-08-26",
+    live_llm: bool = False,
+) -> HTMLResponse:
+    """Render counterfactual benchmark evaluation dashboard."""
+    try:
+        if as_of:
+            date.fromisoformat(as_of)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid as_of date parameter: {exc}") from exc
+
+    try:
+        data = get_results_data(seed=seed, as_of=as_of, live_llm=live_llm)
+    except Exception as exc:
+        logger.exception("Failed to load results page data: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    operator_key = _extract_operator_key(request)
+    return templates.TemplateResponse(
+        request,
+        "results.html",
+        {
+            "data": data,
+            "seed": seed,
+            "as_of": as_of,
+            "live_llm": live_llm,
+            "portfolio": data["portfolio"],
+            "comparative_metrics": data["comparative_metrics"],
+            "strategy_distribution": data["strategy_distribution"],
+            "adjudication_matrix": data["adjudication_matrix"],
+            "operator_key": operator_key,
+        },
+    )
+
+
 
 
 

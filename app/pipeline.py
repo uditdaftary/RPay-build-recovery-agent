@@ -94,7 +94,7 @@ def execute_recovery_pipeline(
                 dec,
                 debtor,
                 d_invoices,
-                {},
+                {"merchant_id": merchant_id or "UNKNOWN", "name": "Supplier", "udyam_registered": False},
                 as_of=as_of,
                 recipient_email=recipient_email,
                 recipient_phone=recipient_phone,

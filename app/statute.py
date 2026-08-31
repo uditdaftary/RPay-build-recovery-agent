@@ -227,9 +227,9 @@ def evaluate_section_43b_h(
     """Evaluate applicability of Income Tax Section 43B(h) to an invoice."""
     if isinstance(merchant, dict):
         merchant_obj = Merchant(
-            merchant_id=merchant["merchant_id"],
-            name=merchant["name"],
-            udyam_registered=merchant["udyam_registered"],
+            merchant_id=merchant.get("merchant_id", "UNKNOWN"),
+            name=merchant.get("name", "Supplier"),
+            udyam_registered=bool(merchant.get("udyam_registered", False)),
             udyam_category=merchant.get("udyam_category"),
             udyam_activity=merchant.get("udyam_activity"),
         )
