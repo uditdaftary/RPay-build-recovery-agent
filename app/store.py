@@ -23,9 +23,19 @@ import json
 import logging
 import os
 import threading
+from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
+
 logger = logging.getLogger(__name__)
+
+# `.env` is loaded here rather than inherited from `app.config`, which validates Razorpay
+# credentials at import and raises without them - this module has to be usable before those
+# are provisioned. Without it `DATABASE_URL` is invisible to any entrypoint that does not
+# import `app.config` first, so a bare `from app import store` silently reported no durable
+# backend while one was configured.
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS audit_events (
@@ -81,12 +91,23 @@ def _connect() -> Any:
     global _pool, _schema_ready
     from psycopg_pool import ConnectionPool
 
+    dsn = database_url()
+    if not dsn:
+        # Fail immediately rather than letting psycopg fall back to a default local
+        # connection and time out after 30 seconds. On a serverless function that hang is
+        # the whole request budget, and the cause - an unset variable - is not in the
+        # timeout message.
+        raise RuntimeError(
+            "DATABASE_URL is not set, so there is no durable store to reach. Callers must "
+            "check store.is_enabled() before using it."
+        )
+
     with _pool_lock:
         if _pool is None:
             # Small: a serverless instance serves few concurrent requests and a large pool
             # against a connection-limited Postgres is how a deploy exhausts the database
             # rather than the function.
-            _pool = ConnectionPool(database_url(), min_size=0, max_size=4, open=True)
+            _pool = ConnectionPool(dsn, min_size=0, max_size=4, open=True)
             # Closed deterministically rather than by the garbage collector: the pool's
             # own finaliser joins its worker threads, and doing that during interpreter
             # shutdown raises PythonFinalizationError on every exit.

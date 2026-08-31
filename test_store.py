@@ -1,28 +1,39 @@
 """Durable-state integration checks.
 
-Skipped unless `DATABASE_URL` names a reachable Postgres, so the default suite stays
-offline and fast. Run against a real engine rather than SQLite: the schema uses `jsonb`,
-`bigserial`, `ON CONFLICT` and `FOR UPDATE SKIP LOCKED`, none of which SQLite would
-exercise faithfully.
+Run against a real engine rather than SQLite: the schema uses `jsonb`, `bigserial`,
+`ON CONFLICT` and `FOR UPDATE SKIP LOCKED`, none of which SQLite would exercise
+faithfully.
+
+**These tests TRUNCATE every table, so they deliberately do not read `DATABASE_URL`.**
+That variable points at whatever database the application is configured with - which,
+once a deployment exists, is production. A destructive suite that auto-targets the app's
+own database destroys the audit log the moment someone runs `pytest` on a machine with a
+populated `.env`. `STORE_TEST_DATABASE_URL` has to be set separately and on purpose.
 
     docker run -d --name recovery-pg -e POSTGRES_PASSWORD=devpass \
         -e POSTGRES_DB=recovery -p 55432:5432 postgres:16-alpine
-    DATABASE_URL=postgresql://postgres:devpass@localhost:55432/recovery python -m pytest test_store.py
+    STORE_TEST_DATABASE_URL=postgresql://postgres:devpass@localhost:55432/recovery \
+        python -m pytest test_store.py
 """
 
 import os
 import unittest
+from unittest.mock import patch
 
 from app import audit, store
 from run_experiment import isolated_audit_log
 
-DSN = os.getenv("DATABASE_URL", "").strip()
+DSN = os.getenv("STORE_TEST_DATABASE_URL", "").strip()
 
 
-@unittest.skipUnless(DSN, "DATABASE_URL is not set; durable-state checks skipped")
+@unittest.skipUnless(DSN, "STORE_TEST_DATABASE_URL is not set; durable-state checks skipped")
 class TestDurableState(unittest.TestCase):
     def setUp(self) -> None:
+        # Point the module at the throwaway database for the duration of each test, so
+        # nothing here can reach whatever DATABASE_URL happens to name.
+        self.enterContext(patch.dict(os.environ, {"DATABASE_URL": DSN}))
         store.reset_for_tests()
+        self.addCleanup(store.reset_for_tests)
         pool = store._connect()
         with pool.connection() as conn:
             conn.execute(
