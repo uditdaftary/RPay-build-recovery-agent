@@ -10,7 +10,6 @@ Connects:
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
@@ -39,7 +38,15 @@ def execute_recovery_pipeline(
     *,
     dry_run: bool = False,
 ) -> PipelineRunResult:
-    """Execute complete end-to-end recovery pipeline across all ledger debtors."""
+    """Execute complete end-to-end recovery pipeline across all ledger debtors.
+
+    A decision is only dispatched unattended when the debtor row carries the contact detail
+    its channel needs. The seeded ledger carries none — its fingerprint is pinned, so the
+    generator cannot grow the fields — so on `data/ledger.json` every non-suppressed debtor
+    routes to the operator review queue and `automated_dispatches` is 0. That is the
+    intended outcome rather than a gap: the alternative was synthesising an address from the
+    debtor's name, which sends a dunning notice to whoever owns that domain.
+    """
     from run_experiment import run_deterministic_agent_batch
 
     # Ensure strategist batch evaluation respects caller's as_of date
@@ -62,18 +69,20 @@ def execute_recovery_pipeline(
         debtor = debtors_by_id.get(dec.debtor_id, {})
         d_invoices = invoices_by_debtor.get(dec.debtor_id, [])
 
-        debtor_id_str = debtor.get("debtor_id") or dec.debtor_id
-        debtor_name_str = debtor.get("name") or dec.debtor_name
-        name_clean = re.sub(r"[^a-z0-9]", "", debtor_name_str.lower()) if debtor_name_str else ""
-        fallback_email = f"{debtor_id_str.lower()}@{name_clean}.in" if name_clean else f"{debtor_id_str.lower()}@example.com"
-        recipient_email = debtor.get("email") or fallback_email
-        recipient_phone = debtor.get("phone") or "+919876543210"
+        recipient_email = debtor.get("email") or debtor.get("recipient_email")
+        recipient_phone = debtor.get("phone") or debtor.get("recipient_phone")
 
         merchant_id = debtor.get("merchant_id")
         merchant = merchants_by_id.get(merchant_id) if merchant_id else None
 
         if debtor.get("opted_out"):
             suppressed_opt_out += 1
+            audit.record(
+                "pipeline.debtor_opted_out",
+                debtor_id=dec.debtor_id,
+                strategy=dec.strategy.value,
+            )
+            continue
 
         if is_kill_switch_active():
             kill_switch_blocked += 1
@@ -122,13 +131,21 @@ def execute_recovery_pipeline(
             recipient_phone=recipient_phone,
         )
 
-        if dec.review_required or dec.action_class == ActionClass.REVIEW_REQUIRED:
+        missing_contact = (
+            (dec.channel == Channel.EMAIL and not recipient_email)
+            or (dec.channel == Channel.WHATSAPP and not recipient_phone)
+        )
+
+        if dec.review_required or dec.action_class == ActionClass.REVIEW_REQUIRED or missing_contact:
+            reasoning = dec.reasoning
+            if missing_contact and not dec.review_required:
+                reasoning = f"Missing {dec.channel.value} contact details: {dec.reasoning}"
             queue_for_review(
                 debtor_id=dec.debtor_id,
                 debtor_name=dec.debtor_name,
                 strategy=dec.strategy.value,
                 ask_amount_paise=dec.ask_amount_paise or 0,
-                reasoning=dec.reasoning,
+                reasoning=reasoning,
                 draft=draft,
                 recipient_email=recipient_email,
                 recipient_phone=recipient_phone,
