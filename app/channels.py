@@ -11,12 +11,13 @@ from __future__ import annotations
 import json
 import logging
 import os
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from app import audit
+from app import audit, contacts
 from app.config import PROJECT_ROOT
 from app.envelope import Channel
 from app.messages import DraftedMessage
@@ -37,8 +38,20 @@ class DispatchResult:
 
 
 def _ensure_outbox() -> Path:
-    OUTBOX_DIR.mkdir(parents=True, exist_ok=True)
-    return OUTBOX_DIR
+    """The sandbox directory, falling back to the system temp dir on a read-only tree.
+
+    Serverless bundles the application read-only and gives one writable path, so a
+    hard-coded `runs/outbox` under the project root raises OSError there. The sandbox is a
+    development convenience, not a record - the audit log is the record - so degrading to
+    a temporary directory is right where failing the dispatch would not be.
+    """
+    try:
+        OUTBOX_DIR.mkdir(parents=True, exist_ok=True)
+        return OUTBOX_DIR
+    except OSError:
+        fallback = Path(tempfile.gettempdir()) / "recovery-outbox"
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
 
 
 def dispatch_email(
@@ -47,34 +60,50 @@ def dispatch_email(
     *,
     dry_run: bool = False,
 ) -> DispatchResult:
-    """Dispatch email via Resend if configured, else write to local outbox sandbox."""
-    resend_key = os.getenv("RESEND_API_KEY", "").strip()
+    """Dispatch email via Resend when armed, else write to the local outbox sandbox.
+
+    The allowlist is applied here rather than at contact resolution, because this is the
+    last point before the message leaves the process and it must hold whatever produced the
+    address. When a redirect happens the intended recipient is preserved in the subject and
+    a banner on the body, so a delivered message never hides who it was really aimed at.
+    """
     msg_id = f"msg_{message.debtor_id}_{int(time.time() * 1000)}"
     from_email = os.getenv("FROM_EMAIL", "recovery@msme-agent.in")
+    live = contacts.send_mode() == contacts.SendMode.LIVE and not dry_run
+
+    delivery_email, redirected_from = contacts.resolve_delivery(recipient_email)
+    subject = message.subject
+    body = message.body
+    if redirected_from:
+        subject = f"[to {redirected_from}] {subject}"
+        body = (
+            f"[Delivery allowlist active: this message was addressed to {redirected_from} "
+            f"and redirected to {delivery_email}. The copy below is unmodified.]\n\n{body}"
+        )
 
     outbox = _ensure_outbox()
     file_path = outbox / f"{msg_id}.txt"
     file_path.write_text(
-        f"To: {recipient_email}\nFrom: {from_email}\nSubject: {message.subject}\n\n{message.body}",
+        f"To: {delivery_email}\nFrom: {from_email}\nSubject: {subject}\n\n{body}",
         encoding="utf-8",
     )
 
     last_error: str | None = None
-    if resend_key and not dry_run:
+    if live:
         try:
             import urllib.request
 
             req_payload = {
                 "from": from_email,
-                "to": [recipient_email],
-                "subject": message.subject,
-                "text": message.body,
+                "to": [delivery_email],
+                "subject": subject,
+                "text": body,
             }
             req = urllib.request.Request(
                 "https://api.resend.com/emails",
                 data=json.dumps(req_payload).encode("utf-8"),
                 headers={
-                    "Authorization": f"Bearer {resend_key}",
+                    "Authorization": f"Bearer {os.getenv('RESEND_API_KEY', '').strip()}",
                     "Content-Type": "application/json",
                 },
                 method="POST",
@@ -85,7 +114,9 @@ def dispatch_email(
                 audit.record(
                     "channel.email_sent",
                     debtor_id=message.debtor_id,
-                    recipient=recipient_email,
+                    recipient=delivery_email,
+                    intended_recipient=redirected_from or delivery_email,
+                    redirected=bool(redirected_from),
                     message_id=remote_id,
                     is_statutory=message.is_statutory,
                     simulated=False,
@@ -103,7 +134,8 @@ def dispatch_email(
             audit.record(
                 "channel.email_failed",
                 debtor_id=message.debtor_id,
-                recipient=recipient_email,
+                recipient=delivery_email,
+                intended_recipient=redirected_from or delivery_email,
                 error=last_error,
             )
             return DispatchResult(
@@ -118,7 +150,9 @@ def dispatch_email(
     audit.record(
         "channel.email_sent",
         debtor_id=message.debtor_id,
-        recipient=recipient_email,
+        recipient=delivery_email,
+        intended_recipient=redirected_from or delivery_email,
+        redirected=bool(redirected_from),
         message_id=msg_id,
         is_statutory=message.is_statutory,
         simulated=True,
@@ -130,7 +164,7 @@ def dispatch_email(
         message_id=msg_id,
         simulated=True,
         error=None,
-        payload={"to": recipient_email, "subject": message.subject, "body": message.body},
+        payload={"to": delivery_email, "subject": subject, "body": body},
     )
 
 

@@ -95,7 +95,14 @@ class TestChannels(unittest.TestCase):
             dark_pattern_clean=True,
         )
         with (
-            patch.dict(os.environ, {"RESEND_API_KEY": "re_test_12345"}),
+            patch.dict(
+                os.environ,
+                {
+                    "RESEND_API_KEY": "re_test_12345",
+                    "SEND_MODE": "live",
+                    "ALLOWED_RECIPIENT": "operator@example.test",
+                },
+            ),
             patch("urllib.request.urlopen", side_effect=Exception("API connection timed out")),
         ):
             res = dispatch_email(msg, "buyer@domain.in", dry_run=False)
@@ -103,6 +110,57 @@ class TestChannels(unittest.TestCase):
             self.assertFalse(res.simulated)
             self.assertIsNotNone(res.error)
             self.assertIn("API connection timed out", res.error)
+
+    def test_a_resend_key_alone_does_not_arm_live_sending(self):
+        """Three things must line up before anything can leave the process.
+
+        A key on its own used to be enough, which meant provisioning Resend for a later
+        demo silently armed the whole portfolio.
+        """
+        msg = DraftedMessage(
+            debtor_id="DEB-005",
+            channel=Channel.EMAIL,
+            language=Language.EN,
+            tone=Tone.FORMAL,
+            subject="Payment Reminder",
+            body="Overdue balance reminder.",
+            is_statutory=False,
+            dark_pattern_clean=True,
+        )
+        for env in (
+            {"RESEND_API_KEY": "re_test_12345"},
+            {"RESEND_API_KEY": "re_test_12345", "SEND_MODE": "live"},
+            {"SEND_MODE": "live", "ALLOWED_RECIPIENT": "operator@example.test"},
+        ):
+            with (
+                patch.dict(os.environ, env, clear=False),
+                patch("urllib.request.urlopen") as urlopen,
+            ):
+                for key in ("SEND_MODE", "ALLOWED_RECIPIENT", "RESEND_API_KEY"):
+                    if key not in env:
+                        os.environ.pop(key, None)
+                res = dispatch_email(msg, "buyer@domain.in", dry_run=False)
+                self.assertTrue(res.simulated, f"{env} armed live sending")
+                urlopen.assert_not_called()
+
+    def test_allowlist_redirects_and_names_the_intended_recipient(self):
+        """No message may reach an address the deployment has not been told to allow."""
+        msg = DraftedMessage(
+            debtor_id="DEB-005",
+            channel=Channel.EMAIL,
+            language=Language.EN,
+            tone=Tone.FORMAL,
+            subject="Payment Reminder",
+            body="Overdue balance reminder.",
+            is_statutory=False,
+            dark_pattern_clean=True,
+        )
+        with patch.dict(os.environ, {"ALLOWED_RECIPIENT": "operator@example.test"}):
+            res = dispatch_email(msg, "stranger@notours.in", dry_run=False)
+
+        self.assertEqual(res.payload["to"], "operator@example.test")
+        self.assertIn("stranger@notours.in", res.payload["subject"])
+        self.assertIn("Overdue balance reminder.", res.payload["body"])
 
     def test_unique_millisecond_outbox_filenames(self):
         msg1 = DraftedMessage(

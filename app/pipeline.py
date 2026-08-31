@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
-from app import audit
+from app import audit, contacts
 from app.channels import dispatch_message
 from app.envelope import ActionClass, Channel
 from app.messages import draft_message_for_decision
@@ -69,8 +69,12 @@ def execute_recovery_pipeline(
         debtor = debtors_by_id.get(dec.debtor_id, {})
         d_invoices = invoices_by_debtor.get(dec.debtor_id, [])
 
-        recipient_email = debtor.get("email") or debtor.get("recipient_email")
-        recipient_phone = debtor.get("phone") or debtor.get("recipient_phone")
+        # Ledger row first, then the contact directory. Contacts are kept out of the
+        # ledger because its seed-42 fingerprint is the reproducibility claim; a debtor in
+        # neither still resolves to None and lands on a human, never a guessed address.
+        directory_email, directory_phone = contacts.for_debtor(dec.debtor_id)
+        recipient_email = debtor.get("email") or debtor.get("recipient_email") or directory_email
+        recipient_phone = debtor.get("phone") or debtor.get("recipient_phone") or directory_phone
 
         merchant_id = debtor.get("merchant_id")
         merchant = merchants_by_id.get(merchant_id) if merchant_id else None
