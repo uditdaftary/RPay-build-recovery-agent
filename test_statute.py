@@ -238,6 +238,16 @@ class TestStatuteAndDisputes(unittest.TestCase):
         self.assertFalse(eval_unreg.is_eligible)
         self.assertIn("not registered", eval_unreg.refusal_reason.lower())
 
+        m_none_category = Merchant("M5", "None Category Corp", True, None, "manufacturing")
+        eval_none_cat = evaluate_section_43b_h(m_none_category, invoice, as_of)
+        self.assertFalse(eval_none_cat.is_eligible)
+        self.assertIn("category", eval_none_cat.refusal_reason.lower())
+
+        m_none_activity = Merchant("M6", "None Activity Corp", True, "small", None)
+        eval_none_act = evaluate_section_43b_h(m_none_activity, invoice, as_of)
+        self.assertFalse(eval_none_act.is_eligible)
+        self.assertIn("activity", eval_none_act.refusal_reason.lower())
+
     def test_section_43b_h_refuses_a_settled_invoice(self) -> None:
         """A fully paid invoice is never a disallowance risk, regardless of merchant eligibility."""
         m_eligible = Merchant("M1", "Eligible Mfg", True, "micro", UdyamActivity.MANUFACTURING)

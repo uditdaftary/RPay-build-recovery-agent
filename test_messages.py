@@ -3,7 +3,7 @@ from datetime import date
 
 from app.envelope import Channel, Language, Strategy, Tone
 from app.messages import draft_message_for_decision, validate_and_sanitize_copy
-from app.statute import calculate_section_16_interest
+from app.statute import calculate_section_16_interest, compute_statutory_dates
 from app.strategist import StrategistDecision
 
 
@@ -120,7 +120,8 @@ class TestMessageDrafting(unittest.TestCase):
         as_of = date(2026, 8, 26)
         msg = draft_message_for_decision(decision, debtor_hi, self.invoices, self.eligible_merchant, as_of=as_of)
         self.assertTrue(msg.is_statutory)
-        interest_res = calculate_section_16_interest(500000_00, date(2026, 7, 10), as_of)
+        _, statutory_due, _ = compute_statutory_dates(date(2026, 5, 25), written_agreement=True)
+        interest_res = calculate_section_16_interest(500000_00, statutory_due, as_of)
         total_disp = f"Rs {interest_res.total_payable_paise // 100:,}"
         self.assertIn(f"total payable amount {total_disp}", msg.body)
 
@@ -251,7 +252,7 @@ class TestMessageDrafting(unittest.TestCase):
                 resolution_url="",
             )
             msg = draft_message_for_decision(decision, self.debtor, self.invoices, self.eligible_merchant, as_of=date(2026, 8, 26))
-            self.assertTrue(msg.dark_pattern_clean)
+            self.assertFalse(msg.dark_pattern_clean)
             self.assertIn("Please be reminded", msg.body)
 
     def test_tds_reconciliation_message_drafting(self):
@@ -309,6 +310,72 @@ class TestMessageDrafting(unittest.TestCase):
         )
         msg = draft_message_for_decision(decision, self.debtor, invoices_null_overdue, self.eligible_merchant, as_of=date(2026, 8, 26))
         self.assertFalse(msg.is_statutory)
+
+    def test_oldest_collectible_invoice_selected_over_zero_balance_first_invoice(self):
+        multi_invoices = [
+            {
+                "invoice_id": "INV-TDS-01",
+                "amount_paise": 500000_00,
+                "amount_received_paise": 450000_00,
+                "tds_deducted_paise": 50000_00,  # Collectible balance is 0
+                "days_overdue": 60,
+                "contractual_due_date": "2026-06-26",
+                "state": "TDS_UNDERPAID",
+            },
+            {
+                "invoice_id": "INV-DUE-02",
+                "amount_paise": 800000_00,
+                "amount_received_paise": 0,
+                "tds_deducted_paise": 0,  # Collectible balance is 800,000_00
+                "days_overdue": 45,
+                "delivery_date": "2026-07-10",
+                "written_agreement": True,
+                "contractual_due_date": "2026-08-24",
+                "state": "OVERDUE",
+            },
+        ]
+        decision = StrategistDecision(
+            debtor_id="DEB-001",
+            debtor_name="Acme Builders",
+            strategy=Strategy.ESCALATE,
+            channel=Channel.EMAIL,
+            language=Language.EN,
+            tone=Tone.FORMAL,
+            ask_amount_paise=800000_00,
+            reasoning="Escalating collectible overdue invoice",
+            confidence=0.95,
+            resolution_url="http://localhost:8000/r/INV-DUE-02",
+        )
+        msg = draft_message_for_decision(decision, self.debtor, multi_invoices, self.eligible_merchant, as_of=date(2026, 8, 26))
+        self.assertTrue(msg.is_statutory)
+        self.assertIn("INV-DUE-02", msg.body)
+
+    def test_trader_refusal_copy_avoids_account_suspension_threat(self):
+        trading_merchant = {
+            "merchant_id": "MER-002",
+            "name": "Sagar Trading",
+            "udyam_registered": True,
+            "udyam_category": "micro",
+            "udyam_activity": "trading",
+        }
+        debtor_hi = dict(self.debtor, language="hinglish")
+        decision = StrategistDecision(
+            debtor_id="DEB-001",
+            debtor_name="Acme Builders",
+            strategy=Strategy.ESCALATE,
+            channel=Channel.EMAIL,
+            language=Language.HINGLISH,
+            tone=Tone.FORMAL,
+            ask_amount_paise=500000_00,
+            reasoning="Trader escalation refusal test",
+            confidence=0.95,
+            resolution_url="",
+        )
+        msg = draft_message_for_decision(decision, debtor_hi, self.invoices, trading_merchant, as_of=date(2026, 8, 26))
+        self.assertFalse(msg.is_statutory)
+        self.assertNotIn("account suspension", msg.body.lower())
+        self.assertNotIn("suspension", msg.body.lower())
+        self.assertIn("commercial payment reminder", msg.body.lower())
 
 
 if __name__ == "__main__":
