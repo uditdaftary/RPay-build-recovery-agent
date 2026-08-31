@@ -29,7 +29,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, field_validator
 
-from app import audit, config, razorpay_gateway, store
+from app import audit, config, contacts, razorpay_gateway, store
 from app.config import PROJECT_ROOT, business_today
 from app.contact_history import MAX_PROMISE_WINDOWS_WITHOUT_SETTLEMENT
 from app.disputes import (
@@ -353,6 +353,13 @@ def health() -> dict[str, object]:
         "webhook_secret_configured": bool(config.RAZORPAY_WEBHOOK_SECRET),
         "model_key_configured": bool(config.GOOGLE_API_KEY),
         "model": config.LLM_MODEL,
+        # Whether state survives this process. False on a serverless deployment with no
+        # DATABASE_URL, where the audit log the envelope folds is scratch space and the
+        # kill switch only ever halts the instance that served the request.
+        "durable_state": store.is_enabled(),
+        "audit_log_ephemeral": audit.ephemeral_fallback_active(),
+        "send_mode": contacts.send_mode(),
+        "delivery_allowlist_configured": bool(contacts.allowed_recipient()),
     }
 
 

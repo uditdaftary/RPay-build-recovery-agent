@@ -1,0 +1,34 @@
+# What must never reach the deployment bundle.
+#
+# .env first and explicitly. It holds live Razorpay and model credentials, the CLI
+# uploads the working directory rather than the git tree, and being gitignored is not
+# the same as being unuploaded. Secrets belong in the project's environment variables,
+# where they are encrypted and can be rotated without a redeploy.
+.env
+.env.local
+*.key
+data/contacts.json
+
+# Local-only state. The audit log and outbox are written at runtime; shipping a
+# development copy would seed the deployment with someone else's events.
+audit/
+runs/
+
+# Not needed at runtime, and every megabyte is cold-start time.
+.git/
+.github/
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.pyc
+.venv/
+venv/
+test_*.py
+verify_all.py
+bugs.md
+ARCHITECTURE.md
+
+# Lint and test configuration only - it has no [project] table, and the Python builder
+# treats any pyproject.toml as a uv project and fails on `uv lock`. Dependencies are
+# declared once, in requirements.txt, which is what the builder should read.
+pyproject.toml
