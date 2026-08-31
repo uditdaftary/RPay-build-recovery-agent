@@ -11,6 +11,7 @@ Verifies:
 
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import tempfile
 import unittest
@@ -42,7 +43,7 @@ class TestExperimentRunner(unittest.TestCase):
         # setUp's isolation must actually be in effect -- without this assertion, deleting
         # the enterContext line would silently send the whole suite back to folding the
         # developer's audit/events.jsonl and it would still pass.
-        self.assertIn("recovery-experiment-audit-", str(audit.AUDIT_DIR))
+        self.assertIn("recovery-experiment-audit-", str(audit.get_audit_dir()))
 
         metrics = calculate_portfolio_metrics(self.ledger)
         self.assertEqual(metrics.total_debtors, 20)
@@ -325,6 +326,36 @@ class TestExperimentRunner(unittest.TestCase):
         self.assertEqual(args.seed, 100)
         self.assertEqual(args.output, "json")
         self.assertTrue(args.live_llm)
+
+    def test_deterministic_batch_does_not_mutate_llm_complete(self) -> None:
+        """Verify run_deterministic_agent_batch preserves global llm.complete function identity."""
+        from app import llm
+        from run_experiment import run_deterministic_agent_batch
+
+        orig_complete = llm.complete
+        run_deterministic_agent_batch(self.ledger)
+        self.assertIs(llm.complete, orig_complete)
+
+    def test_isolated_audit_log_thread_safety(self) -> None:
+        """Verify isolated_audit_log in one thread does not redirect writes in other threads."""
+        from app import audit
+        from run_experiment import isolated_audit_log
+
+        def background_thread_audit_write() -> tuple[Path, Path]:
+            # Thread without isolated_audit_log must see default production paths
+            return audit.get_audit_dir(), audit.get_event_log()
+
+        with isolated_audit_log():
+            isolated_dir = audit.get_audit_dir()
+            self.assertIn("recovery-experiment-audit-", str(isolated_dir))
+
+            # Run in a separate thread pool worker
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                bg_dir, bg_log = pool.submit(background_thread_audit_write).result()
+
+            self.assertEqual(bg_dir, audit.AUDIT_DIR)
+            self.assertEqual(bg_log, audit.EVENT_LOG)
+            self.assertNotEqual(bg_dir, isolated_dir)
 
 
 if __name__ == "__main__":

@@ -40,20 +40,16 @@ logger = logging.getLogger(__name__)
 @contextmanager
 def isolated_audit_log():
     """Point the append-only log at a temporary directory during evaluation in a context-local way."""
-    original_dir, original_log = audit.AUDIT_DIR, audit.EVENT_LOG
     with tempfile.TemporaryDirectory(prefix="recovery-experiment-audit-") as scratch:
         scratch_dir = Path(scratch)
         scratch_log = scratch_dir / "events.jsonl"
         token_dir = audit._current_audit_dir.set(scratch_dir)
         token_log = audit._current_event_log.set(scratch_log)
-        audit.AUDIT_DIR = scratch_dir
-        audit.EVENT_LOG = scratch_log
         try:
             yield
         finally:
             audit._current_audit_dir.reset(token_dir)
             audit._current_event_log.reset(token_log)
-            audit.AUDIT_DIR, audit.EVENT_LOG = original_dir, original_log
 
 
 
@@ -387,13 +383,9 @@ def _deterministic_mock_llm(prompt: str, **kwargs: Any) -> str:
 
 
 def run_deterministic_agent_batch(ledger: dict[str, Any]) -> list[StrategistDecision]:
-    """Run AI strategist deterministically using offline mock solver."""
-    original_complete = llm.complete
-    llm.complete = _deterministic_mock_llm
-    try:
+    """Run AI strategist deterministically using offline mock solver in a context-local way."""
+    with llm.override_complete(_deterministic_mock_llm):
         return run_strategist_batch(ledger)
-    finally:
-        llm.complete = original_complete
 
 
 def calculate_comparative_metrics(
@@ -418,7 +410,7 @@ def calculate_comparative_metrics(
 
     # Restraint Share: WAIT decisions
     agent_wait_count = agent_dist.get(Strategy.WAIT.value, 0)
-    baseline_wait_count = sum(1 for d in baseline_decisions if d.strategy == Strategy.WAIT and d.days_overdue > 0)
+    baseline_wait_count = baseline_dist.get(Strategy.WAIT.value, 0)
     agent_wait_pct = (agent_wait_count / total_debtors * 100) if total_debtors else 0.0
     baseline_wait_pct = (baseline_wait_count / total_debtors * 100) if total_debtors else 0.0
 

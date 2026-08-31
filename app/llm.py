@@ -13,6 +13,9 @@ over across a model chain on a bounded clock and the audit log records which mod
 actually answered.
 """
 
+import contextlib
+import contextvars
+from collections.abc import Callable, Generator
 from typing import Any
 
 import httpx
@@ -26,6 +29,19 @@ from app import audit, config
 RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 
 _client: genai.Client | None = None
+_complete_override: contextvars.ContextVar[Callable[..., str] | None] = contextvars.ContextVar(
+    "_complete_override", default=None
+)
+
+
+@contextlib.contextmanager
+def override_complete(override: Callable[..., str]) -> Generator[None, None, None]:
+    """Context-local override for complete(), preserving the global function identity across threads."""
+    token = _complete_override.set(override)
+    try:
+        yield
+    finally:
+        _complete_override.reset(token)
 
 
 def _get_client() -> genai.Client:
@@ -70,6 +86,14 @@ def complete(
     caller cannot tell that apart from a model that answered badly, so the failover is
     made here rather than guessed at upstream.
     """
+    override = _complete_override.get()
+    if override is not None:
+        return override(
+            prompt,
+            system=system,
+            response_schema=response_schema,
+            temperature=temperature,
+        )
     generation_config = types.GenerateContentConfig(
         system_instruction=system,
         temperature=temperature,

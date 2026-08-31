@@ -61,32 +61,23 @@ def isolated_audit_log():
     log changes what the next run decides, and stops being repeatable — which is the exact
     property the seeded ledger exists to guarantee.
     """
-    original_dir, original_log = audit.AUDIT_DIR, audit.EVENT_LOG
     with tempfile.TemporaryDirectory(prefix="recovery-agent-audit-") as scratch:
         scratch_dir = Path(scratch)
         scratch_log = scratch_dir / "events.jsonl"
         token_dir = audit._current_audit_dir.set(scratch_dir)
         token_log = audit._current_event_log.set(scratch_log)
-        audit.AUDIT_DIR = scratch_dir
-        audit.EVENT_LOG = scratch_log
         try:
             yield
         finally:
             audit._current_audit_dir.reset(token_dir)
             audit._current_event_log.reset(token_log)
-            audit.AUDIT_DIR, audit.EVENT_LOG = original_dir, original_log
-
 
 
 @contextmanager
 def stub_llm(payload: str):
     """Serve a fixed model response, so decision paths are checkable offline and for free."""
-    original = llm.complete
-    llm.complete = lambda prompt, **kwargs: payload
-    try:
+    with llm.override_complete(lambda prompt, **kwargs: payload):
         yield
-    finally:
-        llm.complete = original
 
 
 class ModelWasCalled(BaseException):
@@ -452,39 +443,34 @@ def test_audit_survives_unicode_line_separators() -> None:
     dispute reason fragmented its own row into two unparsable halves, and the strict reader
     then refused every later decision. `reason` is unauthenticated debtor text.
     """
-    with tempfile.TemporaryDirectory(prefix="recovery-agent-audit-rows-") as scratch:
-        original_dir, original_log = audit.AUDIT_DIR, audit.EVENT_LOG
-        audit.AUDIT_DIR = Path(scratch)
-        audit.EVENT_LOG = audit.AUDIT_DIR / "events.jsonl"
+    with isolated_audit_log():
+        event_log = audit.get_event_log()
+        hostile = "short delivered" + chr(0x2028) + chr(0x2029) + chr(0x85) + "please check"
+        audit.record("dispute.raised", debtor_id="DEB-ROW", reason=hostile)
+        audit.record("promise.made", debtor_id="DEB-ROW", promised_date="2026-09-05")
+
+        rows = audit.read_all()
+        assert [r["event"] for r in rows] == ["dispute.raised", "promise.made"], (
+            f"a line separator in debtor text split the log: {rows}"
+        )
+        assert rows[0]["reason"] == hostile, "the reason did not survive the round trip"
+        # One physical line per record, whatever the payload contains.
+        assert event_log.read_bytes().count(b"\n") == 2, "a record wrote two rows"
+
+        # A process killed mid-append can only damage the final line, and that one is
+        # dropped. Anything earlier means the log lost data the envelope reads.
+        event_log.write_text(
+            event_log.read_text(encoding="utf-8") + TRUNCATED_ROW, encoding="utf-8"
+        )
+        assert len(audit.read_all()) == 2, "a truncated final row was not tolerated"
+
+        event_log.write_text(CORRUPT_MIDDLE, encoding="utf-8")
         try:
-            hostile = "short delivered" + chr(0x2028) + chr(0x2029) + chr(0x85) + "please check"
-            audit.record("dispute.raised", debtor_id="DEB-ROW", reason=hostile)
-            audit.record("promise.made", debtor_id="DEB-ROW", promised_date="2026-09-05")
-
-            rows = audit.read_all()
-            assert [r["event"] for r in rows] == ["dispute.raised", "promise.made"], (
-                f"a line separator in debtor text split the log: {rows}"
-            )
-            assert rows[0]["reason"] == hostile, "the reason did not survive the round trip"
-            # One physical line per record, whatever the payload contains.
-            assert audit.EVENT_LOG.read_bytes().count(b"\n") == 2, "a record wrote two rows"
-
-            # A process killed mid-append can only damage the final line, and that one is
-            # dropped. Anything earlier means the log lost data the envelope reads.
-            audit.EVENT_LOG.write_text(
-                audit.EVENT_LOG.read_text(encoding="utf-8") + TRUNCATED_ROW, encoding="utf-8"
-            )
-            assert len(audit.read_all()) == 2, "a truncated final row was not tolerated"
-
-            audit.EVENT_LOG.write_text(CORRUPT_MIDDLE, encoding="utf-8")
-            try:
-                audit.read_all()
-            except ValueError:
-                pass
-            else:
-                raise AssertionError("a corrupt mid-file row was read past silently")
-        finally:
-            audit.AUDIT_DIR, audit.EVENT_LOG = original_dir, original_log
+            audit.read_all()
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("a corrupt mid-file row was read past silently")
     print("ok  audit rows survive debtor text and fail loudly when data is lost")
 
 
