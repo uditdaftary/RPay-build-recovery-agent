@@ -137,6 +137,26 @@ def approve_review_item(debtor_id: str) -> dict[str, Any] | None:
         recipient_email=item.get("recipient_email"),
         recipient_phone=item.get("recipient_phone"),
     )
+    if not res.success:
+        # Put it back at the head of the queue. The pop above happens before the dispatch
+        # is attempted, so a transient failure - a 429, a network blip, a missing recipient -
+        # would otherwise delete a human-approved statutory notice with no way to retry.
+        # Index 0 because the queue is FIFO and this item was the oldest.
+        with _OPERATOR_LOCK:
+            _REVIEW_QUEUE.setdefault(debtor_id, []).insert(0, item)
+        audit.record(
+            "operator.review_dispatch_failed",
+            debtor_id=debtor_id,
+            strategy=item["strategy"],
+            error=res.error,
+        )
+        return {
+            "approved": False,
+            "error": f"Dispatch failed: {res.error}",
+            "requeued": True,
+            "dispatch_result": asdict(res),
+        }
+
     audit.record(
         "operator.review_approved",
         debtor_id=debtor_id,
@@ -167,6 +187,12 @@ def reject_review_item(debtor_id: str, reason: str = "Operator manual rejection"
     return True
 
 
+def _sanitize_csv_cell(val: Any) -> Any:
+    if isinstance(val, str) and val and val[0] in ("=", "+", "-", "@", "\t", "\r"):
+        return f"'{val}"
+    return val
+
+
 def export_audit_events(format_type: str = "json") -> str:
     """Export complete append-only audit trail in JSON or CSV format."""
     events = audit.read_all()
@@ -182,7 +208,8 @@ def export_audit_events(format_type: str = "json") -> str:
         writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         for e in events:
-            writer.writerow(e)
+            sanitized_e = {k: _sanitize_csv_cell(v) for k, v in e.items()}
+            writer.writerow(sanitized_e)
         return output.getvalue()
 
     return json.dumps(events, indent=2, default=str)

@@ -99,11 +99,20 @@ def dispatch_email(
                 )
         except Exception as exc:
             last_error = str(exc)
-            logger.warning("Resend live dispatch failed (%s); falling back to sandbox", exc)
+            logger.warning("Resend live dispatch failed (%s)", exc)
             audit.record(
-                "channel.email_fallback",
+                "channel.email_failed",
                 debtor_id=message.debtor_id,
-                error=str(exc),
+                recipient=recipient_email,
+                error=last_error,
+            )
+            return DispatchResult(
+                success=False,
+                channel=Channel.EMAIL,
+                message_id=msg_id,
+                simulated=False,
+                error=last_error,
+                payload=req_payload,
             )
 
     audit.record(
@@ -120,7 +129,7 @@ def dispatch_email(
         channel=Channel.EMAIL,
         message_id=msg_id,
         simulated=True,
-        error=last_error,
+        error=None,
         payload={"to": recipient_email, "subject": message.subject, "body": message.body},
     )
 
@@ -185,11 +194,29 @@ def dispatch_message(
 ) -> DispatchResult:
     """Route a drafted message to its target channel dispatcher."""
     if message.channel == Channel.EMAIL:
-        target_email = recipient_email or getattr(message, "recipient_email", None) or f"{message.debtor_id.lower()}@example.com"
+        target_email = recipient_email or getattr(message, "recipient_email", None)
+        if not target_email:
+            audit.record("channel.missing_recipient", debtor_id=message.debtor_id, channel="email")
+            return DispatchResult(
+                success=False,
+                channel=Channel.EMAIL,
+                message_id="",
+                simulated=False,
+                error="Missing recipient email address",
+            )
         return dispatch_email(message, target_email, dry_run=dry_run)
 
     if message.channel == Channel.WHATSAPP:
-        target_phone = recipient_phone or getattr(message, "recipient_phone", None) or "+919876543210"
+        target_phone = recipient_phone or getattr(message, "recipient_phone", None)
+        if not target_phone:
+            audit.record("channel.missing_recipient", debtor_id=message.debtor_id, channel="whatsapp")
+            return DispatchResult(
+                success=False,
+                channel=Channel.WHATSAPP,
+                message_id="",
+                simulated=False,
+                error="Missing recipient phone number",
+            )
         return dispatch_whatsapp(message, target_phone, dry_run=dry_run)
 
     if message.channel == Channel.PORTAL:

@@ -99,8 +99,8 @@ class TestChannels(unittest.TestCase):
             patch("urllib.request.urlopen", side_effect=Exception("API connection timed out")),
         ):
             res = dispatch_email(msg, "buyer@domain.in", dry_run=False)
-            self.assertTrue(res.success)
-            self.assertTrue(res.simulated)
+            self.assertFalse(res.success)
+            self.assertFalse(res.simulated)
             self.assertIsNotNone(res.error)
             self.assertIn("API connection timed out", res.error)
 
@@ -166,6 +166,37 @@ class TestChannels(unittest.TestCase):
         res = dispatch_message(msg)
         self.assertTrue(res.success)
         self.assertEqual(res.payload.get("to"), "embedded@custom.in")
+
+    def test_missing_contact_returns_failure_without_synthesis(self):
+        msg_email = DraftedMessage(
+            debtor_id="DEB-NOCONTACT",
+            channel=Channel.EMAIL,
+            language=Language.EN,
+            tone=Tone.FORMAL,
+            subject="Reminder",
+            body="Body text",
+            is_statutory=False,
+            dark_pattern_clean=True,
+            recipient_email=None,
+        )
+        res_email = dispatch_message(msg_email)
+        self.assertFalse(res_email.success)
+        self.assertIn("Missing recipient email", res_email.error)
+
+        msg_wa = DraftedMessage(
+            debtor_id="DEB-NOCONTACT",
+            channel=Channel.WHATSAPP,
+            language=Language.EN,
+            tone=Tone.FORMAL,
+            subject="Reminder",
+            body="Body text",
+            is_statutory=False,
+            dark_pattern_clean=True,
+            recipient_phone=None,
+        )
+        res_wa = dispatch_message(msg_wa)
+        self.assertFalse(res_wa.success)
+        self.assertIn("Missing recipient phone", res_wa.error)
 
 
 if __name__ == "__main__":
