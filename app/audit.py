@@ -6,10 +6,12 @@ the agent did, when, and why. Every decision and every money event lands here, i
 the actions the agent considered and rejected.
 """
 
+import contextvars
 import json
 import logging
 import os
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from app.config import PROJECT_ROOT
@@ -19,6 +21,22 @@ logger = logging.getLogger(__name__)
 AUDIT_DIR = PROJECT_ROOT / "audit"
 EVENT_LOG = AUDIT_DIR / "events.jsonl"
 
+_current_audit_dir: contextvars.ContextVar[Path | None] = contextvars.ContextVar("_current_audit_dir", default=None)
+_current_event_log: contextvars.ContextVar[Path | None] = contextvars.ContextVar("_current_event_log", default=None)
+
+
+def get_audit_dir() -> Path:
+    """Return the active audit directory, respecting task/context-local overrides."""
+    val = _current_audit_dir.get()
+    return val if val is not None else AUDIT_DIR
+
+
+def get_event_log() -> Path:
+    """Return the active event log path, respecting task/context-local overrides."""
+    val = _current_event_log.get()
+    return val if val is not None else EVENT_LOG
+
+
 
 def record(event: str, **fields: Any) -> dict[str, Any]:
     """Append one event and return it. Never raises on serialisation of odd values."""
@@ -27,7 +45,9 @@ def record(event: str, **fields: Any) -> dict[str, Any]:
         "event": event,
         **fields,
     }
-    AUDIT_DIR.mkdir(parents=True, exist_ok=True)
+    audit_dir = get_audit_dir()
+    event_log = get_event_log()
+    audit_dir.mkdir(parents=True, exist_ok=True)
     # One os.write of one already-assembled line, rather than a buffered TextIOWrapper
     # that is free to flush a line in two pieces. Two request threads append here
     # concurrently - the promise endpoint and the webhook both run in Starlette's
@@ -36,7 +56,7 @@ def record(event: str, **fields: Any) -> dict[str, Any]:
     # guarantee available without a lock.
     line = (json.dumps(entry, ensure_ascii=False, default=str) + "\n").encode("utf-8")
     handle = os.open(
-        EVENT_LOG,
+        event_log,
         os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_BINARY", 0),
         # Mode applies on creation only. os.open defaults to 0o777, where the
         # Path.open('a') this replaced created the log 0o666 & ~umask; an audit file
@@ -71,14 +91,15 @@ def read_all() -> list[dict[str, Any]]:
     The final-row skip is warned about rather than recorded: writing into the file being
     read would grow it on every read, and the reader is on the decision path.
     """
-    if not EVENT_LOG.exists():
+    event_log = get_event_log()
+    if not event_log.exists():
         return []
     # split on the newline alone, never str.splitlines(): json.dumps escapes every
     # character below 0x20, so a newline is the only byte that can end a row - but
     # splitlines() also breaks on U+2028, U+2029 and U+0085, which ensure_ascii=False
     # writes through untouched. One of those inside a debtor's dispute reason split its
     # own row in two and, with the strict branch below, stopped every later decision.
-    lines = EVENT_LOG.read_text(encoding="utf-8").split('\n')
+    lines = event_log.read_text(encoding="utf-8").split('\n')
     if lines and lines[-1] == "":
         lines.pop()
     events: list[dict[str, Any]] = []

@@ -199,9 +199,9 @@
     <span class="badge-pill badge-indigo">Benchmark Intelligence</span>
   </div>
   <div style="display: flex; gap: 8px; align-items: center;">
-    <a href="/operator" class="nav-link">Operator Queue</a>
+    <a href="/operator{% if operator_key %}?key={{ operator_key }}{% endif %}" class="nav-link">Operator Queue</a>
     <a href="/results" class="nav-link active">Results &amp; Benchmark</a>
-    <a href="/r/INV-101" target="_blank" class="nav-link">Demo Token (/r/INV-101) &nearr;</a>
+    <a href="/r/INV-101" target="_blank" rel="noopener noreferrer" class="nav-link">Demo Token (/r/INV-101) &nearr;</a>
   </div>
 </nav>
 
@@ -452,7 +452,7 @@
       <tbody>
         {% for item in adjudication_matrix %}
         <!-- Main Row -->
-        <tr class="matrix-row-main" onclick="toggleDetails('{{ item.debtor_id }}')">
+        <tr class="matrix-row-main" data-debtor-id="{{ item.debtor_id }}">
           <td>
             <div style="font-weight: 700; color: #0f172a; font-size: 14px;">{{ item.debtor_name }}</div>
             <div style="color: #64748b; font-size: 12px; margin-top: 2px;">
@@ -475,22 +475,22 @@
             </div>
           </td>
           <td>
-            {% if 'Agent Win' in item.verdict %}
+            {% if item.verdict and 'Agent Win' in item.verdict %}
               <span class="badge-pill badge-emerald" style="font-size: 11px; font-weight: 600;">
                 &#10003; {{ item.verdict }}
               </span>
-            {% elif 'defer' in item.verdict or 'human' in item.verdict %}
+            {% elif item.verdict and ('defer' in item.verdict.lower() or 'human' in item.verdict.lower()) %}
               <span class="badge-pill badge-cyan" style="font-size: 11px; font-weight: 600;">
                 &#8594; {{ item.verdict }}
               </span>
             {% else %}
               <span class="badge-pill badge-slate" style="font-size: 11px;">
-                {{ item.verdict }}
+                {{ item.verdict | default('Evaluated') }}
               </span>
             {% endif %}
           </td>
           <td style="text-align: right;">
-            <button class="btn btn-secondary toggle-btn-{{ item.debtor_id }}" style="font-size: 11px; padding: 4px 8px;" onclick="event.stopPropagation(); toggleDetails('{{ item.debtor_id }}')">
+            <button class="btn btn-secondary btn-details-toggle toggle-btn-{{ item.debtor_id }}" data-debtor-id="{{ item.debtor_id }}" style="font-size: 11px; padding: 4px 8px;">
               Details &#9662;
             </button>
           </td>
@@ -533,7 +533,7 @@
                     <span class="badge-pill badge-emerald" style="font-size: 10px;">{{ item.drafted_copy_preview.channel | upper }} &bull; {{ item.drafted_copy_preview.language | upper }}</span>
                   </div>
                   <div style="font-size: 12px; color: #334155; font-weight: 600; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                    Subject: {{ item.drafted_copy_preview.subject }}
+                    Subject: {{ item.drafted_copy_preview.subject | default('(No Subject - WhatsApp Template)', true) }}
                   </div>
                   <button class="btn btn-primary" style="font-size: 11px; padding: 5px 12px; background: #15803d; border-color: #166534; color: #ffffff;" onclick="openCopyModal({{ loop.index0 }})">
                     Open Full Draft Preview &nearr;
@@ -610,6 +610,22 @@
       if (btn) btn.innerHTML = "Close &#9652;";
     }
   }
+
+  // Event listeners for matrix table rows and buttons
+  document.querySelectorAll(".matrix-row-main").forEach(row => {
+    row.addEventListener("click", () => {
+      const debtorId = row.getAttribute("data-debtor-id");
+      if (debtorId) toggleDetails(debtorId);
+    });
+  });
+
+  document.querySelectorAll(".btn-details-toggle").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const debtorId = btn.getAttribute("data-debtor-id");
+      if (debtorId) toggleDetails(debtorId);
+    });
+  });
 
   document.getElementById("btn-expand-all").addEventListener("click", () => {
     document.querySelectorAll(".matrix-row-details").forEach(row => row.classList.add("open"));
@@ -692,14 +708,34 @@
 
   function copyModalBodyToClipboard() {
     const text = document.getElementById("modal-body").innerText;
-    navigator.clipboard.writeText(text).then(() => {
-      const btn = document.getElementById("btn-copy-clipboard");
-      const orig = btn.innerText;
-      btn.innerText = "Copied!";
-      setTimeout(() => btn.innerText = orig, 1800);
-    }).catch(err => {
-      alert("Failed to copy to clipboard: " + err);
-    });
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(() => {
+        const btn = document.getElementById("btn-copy-clipboard");
+        const orig = btn.innerText;
+        btn.innerText = "Copied!";
+        setTimeout(() => btn.innerText = orig, 1800);
+      }).catch(err => {
+        alert("Failed to copy to clipboard: " + err);
+      });
+    } else {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand("copy");
+        const btn = document.getElementById("btn-copy-clipboard");
+        const orig = btn.innerText;
+        btn.innerText = "Copied!";
+        setTimeout(() => btn.innerText = orig, 1800);
+      } catch (err) {
+        alert("Failed to copy to clipboard: " + err);
+      } finally {
+        document.body.removeChild(ta);
+      }
+    }
   }
 </script>
 {% endblock %}

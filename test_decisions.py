@@ -63,12 +63,19 @@ def isolated_audit_log():
     """
     original_dir, original_log = audit.AUDIT_DIR, audit.EVENT_LOG
     with tempfile.TemporaryDirectory(prefix="recovery-agent-audit-") as scratch:
-        audit.AUDIT_DIR = Path(scratch)
-        audit.EVENT_LOG = audit.AUDIT_DIR / "events.jsonl"
+        scratch_dir = Path(scratch)
+        scratch_log = scratch_dir / "events.jsonl"
+        token_dir = audit._current_audit_dir.set(scratch_dir)
+        token_log = audit._current_event_log.set(scratch_log)
+        audit.AUDIT_DIR = scratch_dir
+        audit.EVENT_LOG = scratch_log
         try:
             yield
         finally:
+            audit._current_audit_dir.reset(token_dir)
+            audit._current_event_log.reset(token_log)
             audit.AUDIT_DIR, audit.EVENT_LOG = original_dir, original_log
+
 
 
 @contextmanager

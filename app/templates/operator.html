@@ -16,7 +16,7 @@
   <div style="display: flex; gap: 8px; align-items: center;">
     <a href="/operator{% if operator_key %}?key={{ operator_key }}{% endif %}" class="nav-link active">Operator Queue</a>
     <a href="/results" class="nav-link">Results &amp; Benchmark</a>
-    <a href="/r/INV-101" target="_blank" class="nav-link">Demo Token (/r/INV-101) &nearr;</a>
+    <a href="/r/INV-101" target="_blank" rel="noopener noreferrer" class="nav-link">Demo Token (/r/INV-101) &nearr;</a>
   </div>
 </nav>
 
@@ -123,7 +123,7 @@
 
 <script>
   let killSwitchState = {{ 'true' if kill_switch_active else 'false' }};
-  const operatorKey = "{{ operator_key | default('') }}";
+  const operatorKey = {{ (operator_key | default('')) | tojson }};
   const authHeaders = {
     "Content-Type": "application/json",
     ...(operatorKey ? { "X-Operator-Key": operatorKey } : {})
@@ -139,6 +139,9 @@
       });
       if (res.ok) {
         window.location.reload();
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        alert("Failed to toggle kill switch: " + (errData.detail || errData.error || res.statusText));
       }
     } catch (err) {
       alert("Error toggling kill switch: " + err);
@@ -152,6 +155,11 @@
         headers: authHeaders,
         body: JSON.stringify({ debtor_id: debtorId }),
       });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        alert("Could not approve: " + (errData.detail || errData.error || res.statusText));
+        return;
+      }
       const data = await res.json();
       if (data.approved) {
         if (btn) {
@@ -199,6 +207,9 @@
             row.remove();
           }
         }
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        alert("Rejection failed: " + (errData.detail || errData.error || res.statusText));
       }
     } catch (err) {
       alert("Rejection failed: " + err);

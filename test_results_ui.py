@@ -67,6 +67,39 @@ class TestResultsUIAndAPI(unittest.TestCase):
         self.assertIn("Silverline Interiors", body)
         self.assertIn("Operator Queue", body)
 
+    def test_get_api_results_invalid_as_of_returns_400(self):
+        response = self.client.get("/api/results?as_of=invalid-date")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Invalid as_of date", response.json()["detail"])
+
+    def test_results_page_invalid_as_of_returns_400(self):
+        response = self.client.get("/results?as_of=invalid-date")
+        self.assertEqual(response.status_code, 400)
+
+    def test_results_page_forwards_operator_key(self):
+        response = self.client.get("/results?key=secret-op-123")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('href="/operator?key=secret-op-123"', response.text)
+        self.assertIn('rel="noopener noreferrer"', response.text)
+
+    def test_results_api_does_not_pollute_production_audit_log(self):
+        from app import audit
+        initial_events_count = len(audit.read_all())
+        response = self.client.get("/api/results?seed=42")
+        self.assertEqual(response.status_code, 200)
+        self.client.get("/results?seed=42")
+        final_events_count = len(audit.read_all())
+        self.assertEqual(initial_events_count, final_events_count)
+
+    def test_mandate_webhook_invalid_failure_code_returns_422(self):
+        response = self.client.post(
+            "/api/mandate/simulate-webhook",
+            json={"mandate_id": "man_101", "failure_code": "NOT_A_CODE"},
+        )
+        self.assertEqual(response.status_code, 422)
+
 
 if __name__ == "__main__":
     unittest.main()
+
+

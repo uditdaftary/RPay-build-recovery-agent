@@ -1,11 +1,11 @@
-# Bug Report — recovery-agent PR #7 — 2026-08-31
+# Bug Report — recovery-agent PR #8 — 2026-08-31
 
 ## Summary
 - Critical: 0 open, 9 fixed
-- Intermediate: 0 open, 11 fixed
-- Normal: 0 open, 13 fixed
+- Intermediate: 0 open, 20 fixed
+- Normal: 0 open, 19 fixed
 - Total Open Findings: 0 (100% Resolved)
-- Total Resolved Findings: 33
+- Total Resolved Findings: 48
 
 ---
 
@@ -15,16 +15,76 @@
 ---
 
 ## 🟡 Intermediate
-*(All 11 Intermediate findings resolved and verified.)*
+*(All 20 Intermediate findings resolved and verified.)*
 
 ---
 
 ## 🟢 Normal
-*(All 13 Normal findings resolved and verified.)*
+*(All 19 Normal findings resolved and verified.)*
 
 ---
 
 ## ✅ Resolved
+
+### BUG-034: Audit Log State Bleed on `/results` & `/api/results` Message Preview Drafting — Fixed 2026-08-31
+- **File:** `app/server.py:851-905`
+- **Resolution:** Wrapped entire benchmark evaluation and copy preview drafting data preparation block inside `with isolated_audit_log():`, preventing preview drafting from recording events to the live production `audit/events.jsonl` log.
+
+### BUG-035: Non-Constant-Time Operator Secret Key Comparison on `/operator` Dashboard View — Fixed 2026-08-31
+- **File:** `app/server.py:722`
+- **Resolution:** Replaced naive string inequality with `hmac.compare_digest(key, expected)` in `operator_dashboard()`, mitigating timing side-channel attacks.
+
+### BUG-036: Missing Query Parameter Forwarding from `/results` Navbar to `/operator` Console — Fixed 2026-08-31
+- **File:** `app/templates/results.html:202` & `app/server.py:953-971`
+- **Resolution:** Extracted `operator_key` from request and passed to template context in `results_page()`, updating `/results` navbar link to `<a href="/operator{% if operator_key %}?key={{ operator_key }}{% endif %}">`.
+
+### BUG-037: Inline `<script>` Template Variable Interpolation Allows Script Tag Breakout in Operator Console — Fixed 2026-08-31
+- **File:** `app/templates/operator.html:126`
+- **Resolution:** Replaced string interpolation with Jinja2's `| tojson` filter (`const operatorKey = {{ (operator_key | default('')) | tojson }};`), eliminating script tag breakout vulnerabilities.
+
+### BUG-038: Unhandled Jinja2 `TypeError` Crash on Null `item.verdict` in Results Evaluation Matrix — Fixed 2026-08-31
+- **File:** `app/templates/results.html:478`
+- **Resolution:** Added defensive null checks `{% if item.verdict and 'Agent Win' in item.verdict %}` to prevent `TypeError` when `item.verdict` is `None`.
+
+### BUG-039: Inline Attribute JavaScript String Breakout via Unsanitized `debtor_id` in Results Table Details Toggle — Fixed 2026-08-31
+- **File:** `app/templates/results.html:455, 493`
+- **Resolution:** Removed inline `onclick` string interpolation, added `data-debtor-id` attributes, and bound event listeners via JavaScript.
+
+### BUG-040: `simulate_mandate_webhook` Unhandled `ValueError` / 500 Internal Server Error on Invalid `failure_code` Input — Fixed 2026-08-31
+- **File:** `app/server.py:657-667`
+- **Resolution:** Annotated `failure_code: MandateFailureCode` on `MandateWebhookSimulateRequest`, allowing Pydantic to validate the enum and return standard HTTP 422 JSON validation errors.
+
+### BUG-041: `evaluate_section_43b_h` Direct Subscript `merchant["merchant_id"]` Crashes with `KeyError` on Unresolved Merchant Fallback — Fixed 2026-08-31
+- **File:** `app/pipeline.py:97` & `app/statute.py:228-236`
+- **Resolution:** Safely extracted merchant dictionary keys using `.get()` in `evaluate_section_43b_h()` and provided explicit fallback merchant dictionary in `pipeline.py`.
+
+### BUG-042: `isolated_audit_log()` Mutates Global Module Variables Non-Atomically in Multi-Threaded Runtime — Fixed 2026-08-31
+- **File:** `app/audit.py:17-35` & `run_experiment.py:41-55`
+- **Resolution:** Added `contextvars.ContextVar` support (`_current_audit_dir`, `_current_event_log`) in `app/audit.py` to route audit log events per-context safely in multi-threaded runtimes.
+
+### BUG-043: Missing Debtor Merchant ID Silently Defaults to First Available Merchant in `get_results_data` — Fixed 2026-08-31
+- **File:** `app/server.py:872-873`
+- **Resolution:** Replaced `"MER-001"` default with explicit unmapped merchant fallback dictionary (`{"merchant_id": "UNKNOWN", "name": "Supplier", "udyam_registered": False}`).
+
+### BUG-044: Unhandled `ValueError` on Malformed `as_of` Date Query Parameter in `/api/results` — Fixed 2026-08-31
+- **File:** `app/server.py:932, 949`
+- **Resolution:** Validated `as_of` parameter and caught `ValueError` from `date.fromisoformat()`, returning HTTP 400 Bad Request.
+
+### BUG-045: Operator Console Lacks User-Facing Error Alerts on Non-200 / 4xx API Rejections — Fixed 2026-08-31
+- **File:** `app/templates/operator.html:150-156, 183-203`
+- **Resolution:** Added `res.ok` status validation and user-facing alert notifications on approval/rejection failures.
+
+### BUG-046: Unhandled `TypeError` on Insecure HTTP Context Accessing `navigator.clipboard` — Fixed 2026-08-31
+- **File:** `app/templates/results.html:694-703`
+- **Resolution:** Added capability check for `navigator.clipboard` with fallback to `document.execCommand('copy')` via hidden textarea.
+
+### BUG-047: Missing Fallback Filter for Null WhatsApp / SMS Subject Lines Displays "Subject: None" in Evaluation Card Preview — Fixed 2026-08-31
+- **File:** `app/templates/results.html:536`
+- **Resolution:** Applied Jinja2 `default` filter: `{{ item.drafted_copy_preview.subject | default('(No Subject - WhatsApp Template)', true) }}`.
+
+### BUG-048: External Navigation Links Lack `rel="noopener noreferrer"` Reverse Tabnabbing Protection — Fixed 2026-08-31
+- **File:** `app/templates/results.html:204` & `app/templates/operator.html:19`
+- **Resolution:** Added `rel="noopener noreferrer"` to all `target="_blank"` anchor tags across both templates.
 
 ### BUG-001: Hinglish Statutory Escalation Notice Displays Interest Only as Total Payable Amount — Fixed 2026-08-31
 - **File:** `app/messages.py:185`
