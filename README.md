@@ -106,7 +106,7 @@ python -m uvicorn app.server:app --reload --port 8000
 Access the application surfaces:
 - **Landing & Demo Portals:** http://localhost:8000/
 - **Debtor Multi-Door Resolution:** http://localhost:8000/r/INV-4008
-- **Human Operator Console:** http://localhost:8000/operator?key=operator-secret-key
+- **Human Operator Console:** http://localhost:8000/operator (requires `OPERATOR_API_KEY` header/token)
 - **Counterfactual Benchmark Dashboard:** http://localhost:8000/results
 - **Health Check:** http://localhost:8000/health
 

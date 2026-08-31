@@ -18,6 +18,8 @@ import json
 import logging
 import os
 import threading
+from collections import OrderedDict
+from copy import deepcopy
 from datetime import date, timedelta
 
 import razorpay
@@ -697,9 +699,9 @@ def _extract_operator_key(request: Request) -> str | None:
 
 
 def verify_operator_auth(request: Request) -> str:
-    expected = os.getenv("OPERATOR_API_KEY", "operator-secret-key")
+    expected = os.getenv("OPERATOR_API_KEY", "").strip()
     key = _extract_operator_key(request)
-    if not key or not hmac.compare_digest(key, expected):
+    if not expected or not key or not hmac.compare_digest(key, expected):
         raise HTTPException(status_code=401, detail="Unauthorized operator access")
     return key
 
@@ -716,9 +718,9 @@ class ReviewActionRequest(BaseModel):
 @app.get("/operator", response_class=HTMLResponse)
 def operator_dashboard(request: Request) -> HTMLResponse:
     """Render operator dashboard with live kill switch and review queue."""
-    expected = os.getenv("OPERATOR_API_KEY", "operator-secret-key")
+    expected = os.getenv("OPERATOR_API_KEY", "").strip()
     key = _extract_operator_key(request)
-    if not key or not hmac.compare_digest(key, expected):
+    if not expected or not key or not hmac.compare_digest(key, expected):
         return HTMLResponse(
             "<h1>401 Unauthorized</h1><p>Invalid or missing operator credentials.</p>",
             status_code=401,
@@ -841,12 +843,43 @@ ARCHETYPE_DETAILS: dict[int, dict[str, str]] = {
 }
 
 
+# The published demo run. Anything else on the HTTP surface is an operator-only request,
+# because a benchmark run is a full portfolio evaluation and `seed` and `as_of` come
+# straight off the query string.
+DEFAULT_RESULTS_SEED = 42
+DEFAULT_RESULTS_AS_OF = "2026-08-26"
+
+# Bounded, and small on purpose. The key is (seed, as_of), both caller-supplied, so an
+# unbounded dict here is a way to grow the heap one 13 KB benchmark at a time. FIFO
+# eviction rather than true LRU: the working set is the default key plus whatever an
+# operator is currently comparing against, and that fits either way.
+_RESULTS_CACHE: OrderedDict[tuple[int, str], dict[str, object]] = OrderedDict()
+_RESULTS_CACHE_MAX = 8
+
+
+def _require_default_results_params(request: Request, seed: int, as_of: str, live_llm: bool) -> None:
+    """Anything beyond the published demo run costs a full experiment, so it needs a key.
+
+    `live_llm` spends real model budget; a non-default `seed` or `as_of` spends CPU and a
+    cache slot. All three are unauthenticated query parameters, so they are gated together
+    rather than one at a time.
+    """
+    if live_llm or seed != DEFAULT_RESULTS_SEED or as_of != DEFAULT_RESULTS_AS_OF:
+        verify_operator_auth(request)
+
+
 def get_results_data(
     seed: int = 42,
     as_of: str = "2026-08-26",
     live_llm: bool = False,
 ) -> dict[str, object]:
     """Execute evaluation run and return enriched benchmark results."""
+    cache_key = (seed, as_of)
+    if not live_llm and cache_key in _RESULTS_CACHE:
+        # A copy, not the stored dict. Handing out the cached object makes every caller a
+        # potential writer of every later caller's response.
+        return deepcopy(_RESULTS_CACHE[cache_key])
+
     with isolated_audit_log():
         exp = run_experiment(seed=seed, as_of=as_of, live_llm=live_llm)
 
@@ -904,7 +937,7 @@ def get_results_data(
                 "drafted_copy_preview": copy_preview,
             })
 
-        return {
+        res_data = {
             "seed": exp.seed,
             "as_of": exp.as_of,
             "is_live_llm": exp.is_live_llm,
@@ -925,20 +958,29 @@ def get_results_data(
             "comparative_metrics": exp.comparative_metrics,
             "adjudication_matrix": enriched_matrix,
         }
+        if not live_llm:
+            _RESULTS_CACHE[cache_key] = deepcopy(res_data)
+            while len(_RESULTS_CACHE) > _RESULTS_CACHE_MAX:
+                _RESULTS_CACHE.popitem(last=False)
+        return res_data
 
 
 @app.get("/api/results")
 def get_api_results(
+    request: Request,
     seed: int = 42,
     as_of: str = "2026-08-26",
     live_llm: bool = False,
 ) -> JSONResponse:
     """Return complete benchmark evaluation dataset in JSON format."""
+    # Shape before authorisation: a malformed date is a 400 whoever asks, and answering it
+    # with a 401 would tell a caller their date was fine when it was not.
     try:
         if as_of:
             date.fromisoformat(as_of)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"Invalid as_of date parameter: {exc}") from exc
+    _require_default_results_params(request, seed, as_of, live_llm)
 
     try:
         data = get_results_data(seed=seed, as_of=as_of, live_llm=live_llm)
@@ -956,11 +998,13 @@ def results_page(
     live_llm: bool = False,
 ) -> HTMLResponse:
     """Render counterfactual benchmark evaluation dashboard."""
+    # Shape before authorisation; see the note on the JSON endpoint.
     try:
         if as_of:
             date.fromisoformat(as_of)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"Invalid as_of date parameter: {exc}") from exc
+    _require_default_results_params(request, seed, as_of, live_llm)
 
     try:
         data = get_results_data(seed=seed, as_of=as_of, live_llm=live_llm)
