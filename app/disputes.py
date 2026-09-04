@@ -57,13 +57,19 @@ def _roots(*fragments: str) -> re.Pattern[str]:
     return re.compile("|".join(fragments), re.IGNORECASE)
 
 
-# Ordered most-specific-claim-first: the first pattern that matches wins, so this sequence
-# *is* the classifier's precedence, not just a list. A claim that the debt is already
-# settled, or that the invoice went to the wrong legal entity, outranks any claim about
-# what was delivered. A pricing dispute (INVOICE_MISMATCH) outranks a quantity/condition
-# dispute (GOODS_SERVICES) because the two overlap ("40 billed, 32 received") and the money
-# figure is the narrower question. Reordering these rows changes classifications that the
-# resolution page (evidence checklist) and the audit log both persist.
+# The first pattern that matches wins, so this sequence *is* the classifier's precedence,
+# not just a list. It is ordered by which claim is the narrower question, NOT by how
+# specific the patterns happen to be: a claim that the debt is already settled, or that
+# the invoice went to the wrong legal entity, outranks any claim about what was delivered;
+# a pricing dispute (INVOICE_MISMATCH) outranks a quantity/condition dispute
+# (GOODS_SERVICES) because the two overlap ("40 billed, 32 received") and the money figure
+# is the narrower question.
+#
+# Because a broad root high in this table beats a precise root low in it, every pattern
+# above GOODS_SERVICES has to match a *claim* rather than a passing mention - a reason
+# that merely says the word "tax" is not a tax dispute. Reordering these rows, or
+# loosening a root in one, changes classifications that the resolution page (evidence
+# checklist) and the audit log both persist.
 _CATEGORY_PATTERNS: tuple[tuple[DisputeCategory, re.Pattern[str]], ...] = (
     (
         DisputeCategory.ALREADY_PAID,
@@ -97,7 +103,15 @@ _CATEGORY_PATTERNS: tuple[tuple[DisputeCategory, re.Pattern[str]], ...] = (
         _roots(
             r"\bgst\b", r"\bgstr", r"\bhsn\b", r"\bsac code", r"\btds\b", r"\btcs\b",
             r"\bcess\b", r"\bi[- ]?gst", r"\bc[- ]?gst", r"\bs[- ]?gst", r"\butgst",
-            r"\btax", r"input (tax )?credit", r"\bitc\b", r"\b2b\b", r"\b26as\b",
+            # Claim-shaped, not a bare root. `\btax` matched any passing mention of tax
+            # and, from this row, beat an explicit short-delivery claim further down:
+            # "short delivered, and the tax on the invoice is also wrong" classified as
+            # TAX_GST and asked the debtor for a GSTR-2B certificate. Every real tax
+            # dispute in this domain names an artefact, and those are the roots above.
+            r"\btax (rate|amount|percent|percentage|mismatch|deduct|credit|component|"
+            r"calculation|invoice|slab|head)",
+            r"(wrong|incorrect|excess|short|extra|higher|lower) tax\b",
+            r"input (tax )?credit", r"\bitc\b", r"\b2b\b", r"\b26as\b",
             r"reverse charge", r"\brcm\b", r"withholding",
         ),
     ),
@@ -194,6 +208,13 @@ def classify_dispute_reason(reason_text: str | None) -> DisputeCategory:
     Matches on word roots, not exact phrases, so natural phrasings ("short delivered",
     "billed twice", "paid via NEFT") land in the right category. Precedence is defined by
     the order of ``_CATEGORY_PATTERNS``.
+
+    Widening a keyword list can narrow it: moving to roots silently dropped "paid on",
+    "wrong recipient", "subsidiary entity", "units received" and a bare "quality", all of
+    which the exact-phrase lists had matched, and a debtor asserting they had already paid
+    was left holding the UNKNOWN evidence checklist. Those five are pinned by
+    ``test_dispute_classification_no_phrasing_lost_to_roots``; anything taken out of this
+    table needs the same treatment.
     """
     if not reason_text or not reason_text.strip():
         return DisputeCategory.UNKNOWN
@@ -208,13 +229,6 @@ def classify_dispute_reason(reason_text: str | None) -> DisputeCategory:
 def recompute_statutory_dates_on_dispute(
     delivery_date: date,
     written_agreement: bool,
-
-    Widening a keyword list can narrow it: moving to roots silently dropped "paid on",
-    "wrong recipient", "subsidiary entity", "units received" and a bare "quality", all of
-    which the exact-phrase lists had matched, and a debtor asserting they had already paid
-    was left holding the UNKNOWN evidence checklist. Those five are pinned by
-    ``test_dispute_classification_no_phrasing_lost_to_roots``; anything taken out of this
-    table needs the same treatment.
     objection_date: date,
     resolution_date: date | None = None,
 ) -> tuple[date | None, date | None, date | None]:

@@ -11,10 +11,12 @@ Verifies:
 from __future__ import annotations
 
 import copy
+import json
 import unittest
 from datetime import date, timedelta
 from decimal import Decimal
 
+from app.config import PROJECT_ROOT
 from app.disputes import (
     DisputeCategory,
     classify_dispute_reason,
@@ -461,9 +463,14 @@ class TestStatuteAndDisputes(unittest.TestCase):
         for a GSTR-2B mismatch certificate instead of an inspection report.
         """
         self.assertEqual(
-            classify_dispute_reason("This invoice appears to duplicate INV-3902"),
-            DisputeCategory.DUPLICATE,
+            classify_dispute_reason(
+                "Goods were short delivered, and the tax on the invoice is also wrong."
+            ),
+            DisputeCategory.GOODS_SERVICES,
         )
+        # Still a tax dispute when the reason actually makes one.
+        for reason in ("The tax rate applied is wrong", "Excess tax charged on this bill"):
+            self.assertEqual(classify_dispute_reason(reason), DisputeCategory.TAX_GST, reason)
 
     def test_dispute_recompute_statutory_dates(self) -> None:
         """Test recomputing statutory dates on dispute objection inside 15 days vs outside."""
