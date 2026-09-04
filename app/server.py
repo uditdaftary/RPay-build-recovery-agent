@@ -189,7 +189,13 @@ def demo_token() -> str:
     regenerated - which is exactly what a hardcoded `INV-101` did.
     """
     live = demo_tokens()
-    return live[0] if live else next(iter(INVOICES), "")
+    if live:
+        return live[0]
+    # Every invoice is settled, disputed or otherwise not chaseable. Still route through
+    # `_is_chaseable` rather than grabbing whatever is first in `INVOICES` - that was the
+    # membership-only check that put a "Pay ₹0.00" button in front of a debtor to begin
+    # with. An empty string 404s cleanly instead of resurrecting it.
+    return next((t for t in INVOICES if _is_chaseable(t)), "")
 
 
 templates.env.globals["demo_token"] = demo_token
