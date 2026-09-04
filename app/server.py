@@ -159,6 +159,10 @@ def demo_token() -> str:
 
 templates.env.globals["demo_token"] = demo_token
 
+# How many review-queue rows the console renders inline. Each row embeds a full drafted
+# message body, so the page grows by kilobytes per item; the API serves the rest.
+OPERATOR_QUEUE_PAGE_SIZE = 25
+
 
 # The debtor-facing bounds. Kept together and above the page that publishes them into the
 # form, so a reader of resolution_page can see what limits it is rendering.
@@ -809,6 +813,7 @@ class ReviewActionRequest(BaseModel):
 @app.get("/operator", response_class=HTMLResponse)
 def operator_dashboard(request: Request) -> HTMLResponse:
     """Render operator dashboard with live kill switch and review queue."""
+    queue = get_review_queue()
     expected = os.getenv("OPERATOR_API_KEY", "").strip()
     key = _extract_operator_key(request)
     if not expected or not key or not hmac.compare_digest(key, expected):
@@ -821,7 +826,11 @@ def operator_dashboard(request: Request) -> HTMLResponse:
         "operator.html",
         {
             "kill_switch_active": is_kill_switch_active(),
-            "queue": get_review_queue(),
+            # FIFO order is the queue's own contract, so the bound keeps the oldest.
+            # Unbounded this rendered 193 rows and 600KB of drafted message bodies into
+            # one server-rendered page; the count above it stays honest about the rest.
+            "queue": queue[:OPERATOR_QUEUE_PAGE_SIZE],
+            "queue_total": len(queue),
             "operator_key": key,
             # The decision log the console renders is the audit log itself, newest first.
             # Bounded because the page is server-rendered and the log grows per run.
