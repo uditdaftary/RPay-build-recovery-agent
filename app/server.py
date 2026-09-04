@@ -13,6 +13,7 @@ webhook is what tells the *system*, and it is the only one that arrives when the
 closes the tab mid-redirect. Suppression therefore hangs off the webhook alone.
 """
 
+import contextvars
 import hmac
 import json
 import logging
@@ -119,6 +120,27 @@ def _load_invoices() -> dict[str, dict]:
 INVOICES: dict[str, dict] = _load_invoices()
 
 
+# The resolved demo list for the request in flight. `demo_tokens` is reached three times
+# while `/` renders - the route, the shared nav, the quick-jump card - and on a store that
+# is merely slow rather than absent, retrying the read at each of them turns one timeout
+# into three. Same context-per-request reset as `_hydrated_this_request`.
+_demo_tokens_this_request: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar(
+    "_demo_tokens_this_request", default=None
+)
+
+
+def _is_chaseable(token: str) -> bool:
+    """Whether an invoice is worth pointing a debtor at: it exists and still owes money.
+
+    Applied to the `DEMO_TOKENS` override as well as the computed list. Checking only
+    membership in `INVOICES` let a curated token that the store had since settled or
+    disputed back onto the page, which is the "Pay 0.00" button the per-request
+    resolution was added to prevent - just reached through the configured path instead.
+    """
+    invoice = INVOICES.get(token)
+    return invoice is not None and invoice["status"] == "OVERDUE" and _balance_paise(invoice) > 0
+
+
 def demo_tokens() -> list[str]:
     """The handful of invoices the index page and the global nav showcase.
 
@@ -132,18 +154,31 @@ def demo_tokens() -> list[str]:
     with a live balance. A knob, not a hardcode, because which cases tell the story is a
     human's call.
     """
-    _hydrate_invoices()
-    override = os.getenv("DEMO_TOKENS", "").strip()
-    if override:
-        named = [t.strip() for t in override.split(",") if t.strip() in INVOICES]
-        if named:
-            return named
-    chaseable = [
-        t for t, inv in INVOICES.items()
-        if inv["status"] == "OVERDUE" and _balance_paise(inv) > 0
+    cached = _demo_tokens_this_request.get()
+    if cached is not None:
+        return cached
+    try:
+        _hydrate_invoices()
+    except Exception:
+        # Deliberately soft, and only here. This runs for the global nav on every page,
+        # so an unreachable store used to turn a link into a 500 on surfaces that hold no
+        # invoice data at all. The money paths keep calling `_hydrate_invoices` directly
+        # and still fail loud, because a settlement this process cannot see is not
+        # something to paper over. Worst case the demo link is chosen from ledger state.
+        logger.exception("could not hydrate invoices for the demo link; using ledger state")
+    named = [
+        t.strip()
+        for t in os.getenv("DEMO_TOKENS", "").split(",")
+        if _is_chaseable(t.strip())
     ]
-    chaseable.sort(key=lambda t: INVOICES[t]["days_overdue"], reverse=True)
-    return chaseable[:3]
+    if not named:
+        named = sorted(
+            (t for t in INVOICES if _is_chaseable(t)),
+            key=lambda t: INVOICES[t]["days_overdue"],
+            reverse=True,
+        )[:3]
+    _demo_tokens_this_request.set(named)
+    return named
 
 
 def demo_token() -> str:
@@ -162,6 +197,25 @@ templates.env.globals["demo_token"] = demo_token
 # How many review-queue rows the console renders inline. Each row embeds a full drafted
 # message body, so the page grows by kilobytes per item; the API serves the rest.
 OPERATOR_QUEUE_PAGE_SIZE = 25
+
+# How many `decision.made` rows the console's decision log renders.
+OPERATOR_DECISION_LOG_SIZE = 25
+
+
+def _console_queue_window(queue: list[dict]) -> list[dict]:
+    """The queue rows the console renders: the oldest pending action per debtor.
+
+    A flat `queue[:N]` assumed the queue was one FIFO. Without a database it is not -
+    `get_review_queue` flattens a dict keyed by debtor, so the first N rows were the
+    first few debtors' entire backlogs and every debtor after them lost their Approve
+    and Reject buttons. One row per debtor is also exactly what the actions need, since
+    `approve_review_item` and `reject_review_item` take a debtor id and act on that
+    debtor's oldest item - the row rendered here.
+    """
+    oldest_per_debtor: dict[str, dict] = {}
+    for item in queue:
+        oldest_per_debtor.setdefault(item.get("debtor_id"), item)
+    return list(oldest_per_debtor.values())[:OPERATOR_QUEUE_PAGE_SIZE]
 
 
 # The debtor-facing bounds. Kept together and above the page that publishes them into the
@@ -198,25 +252,6 @@ def rejected_input(request: Request, exc: RequestValidationError) -> JSONRespons
     # Logged, not recorded. These endpoints are public and unauthenticated, and the audit
     # log is now an input to the envelope that `contact_history` re-parses in full on every
     # decision - so an audit row per rejected request is an anonymous way to grow the file
-# How many `decision.made` rows the console's decision log renders.
-OPERATOR_DECISION_LOG_SIZE = 25
-
-
-def _console_queue_window(queue: list[dict]) -> list[dict]:
-    """The queue rows the console renders: the oldest pending action per debtor.
-
-    A flat `queue[:N]` assumed the queue was one FIFO. Without a database it is not -
-    `get_review_queue` flattens a dict keyed by debtor, so the first N rows were the
-    first few debtors' entire backlogs and every debtor after them lost their Approve
-    and Reject buttons. One row per debtor is also exactly what the actions need, since
-    `approve_review_item` and `reject_review_item` take a debtor id and act on that
-    debtor's oldest item - the row rendered here.
-    """
-    oldest_per_debtor: dict[str, dict] = {}
-    for item in queue:
-        oldest_per_debtor.setdefault(item.get("debtor_id"), item)
-    return list(oldest_per_debtor.values())[:OPERATOR_QUEUE_PAGE_SIZE]
-
     # the decision engine reads. Same reasoning `read_all` and `contact_history` already
     # apply to malformed rows: a defect in the caller belongs where defects go, not in the
     # evaluation artifact. Every field is named, because repeated probing is the pattern
@@ -309,6 +344,16 @@ def _persist_invoice(invoice: dict) -> None:
     store.save_invoice_runtime(invoice["invoice_id"], state)
 
 
+# One hydration per request. Starlette runs each request in its own context - a copy for
+# a sync route in the threadpool, a fresh one per task for an async route - so this resets
+# itself at the request boundary without a middleware to reset it. Rendering `/` used to
+# cost three full reads of the runtime table: the route, the shared nav, and the page's
+# own quick-jump card each resolved the demo token from scratch.
+_hydrated_this_request: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "_hydrated_this_request", default=False
+)
+
+
 def _hydrate_invoices() -> None:
     """Fold the durable lifecycle back over the ledger-derived view.
 
@@ -316,9 +361,12 @@ def _hydrate_invoices() -> None:
     is rarely the one that served the page. Without this a settlement recorded by the
     webhook is invisible to the next request and the debtor keeps being chased.
     """
-    if not store.is_enabled():
+    if not store.is_enabled() or _hydrated_this_request.get():
         return
-    for invoice_id, state in store.load_invoice_runtime().items():
+    runtime = store.load_invoice_runtime()
+    # Set after the read, so a failed read is retried rather than recorded as done.
+    _hydrated_this_request.set(True)
+    for invoice_id, state in runtime.items():
         invoice = INVOICES.get(invoice_id)
         if invoice is not None:
             invoice.update(state)
@@ -842,6 +890,7 @@ def operator_dashboard(request: Request) -> HTMLResponse:
             "<h1>401 Unauthorized</h1><p>Invalid or missing operator credentials.</p>",
             status_code=401,
         )
+    queue = get_review_queue()
     return templates.TemplateResponse(
         request,
         "operator.html",
