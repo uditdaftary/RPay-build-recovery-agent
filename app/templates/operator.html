@@ -82,6 +82,7 @@
 </div>
 
 <div class="card">
+  {% set queue_total = queue_total | default(queue | length, true) %}
   <h2 style="margin: 0 0 4px 0; font-size: 16px; color: var(--text);">Review-first mode: pending human approvals ({{ queue_total }})</h2>
   {% if queue_total > queue | length %}
   <p style="margin: 0 0 16px 0; color: var(--muted); font-size: 12px;">
