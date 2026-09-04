@@ -87,7 +87,7 @@ class TestResultsUIAndAPI(unittest.TestCase):
         self.assertIn("Hard-Case Adjudication Matrix", body)
         self.assertIn("Kaveri Textiles", body)
         self.assertIn("Silverline Interiors", body)
-        self.assertIn("Operator Queue", body)
+        self.assertIn("Operator Console", body)
 
     def test_get_api_results_invalid_as_of_returns_400(self):
         response = self.client.get("/api/results?as_of=invalid-date")

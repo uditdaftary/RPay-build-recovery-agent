@@ -119,16 +119,25 @@ def _load_invoices() -> dict[str, dict]:
 INVOICES: dict[str, dict] = _load_invoices()
 
 
-def _demo_tokens() -> list[str]:
-    """The handful of invoices the index page showcases.
+def demo_tokens() -> list[str]:
+    """The handful of invoices the index page and the global nav showcase.
 
-    `DEMO_TOKENS` in the environment names them explicitly once the ledger has been eyeballed;
-    absent that, the clearest chase cases stand in — the most overdue invoices with a live
-    balance. A knob, not a hardcode, because which cases tell the story is a human's call.
+    Resolved per request, not once at import. The durable store outlives the process, so
+    an invoice settled in an earlier session is still OVERDUE in the ledger this module
+    loaded: pinning the list at import pointed the nav's "Live Demo" link at a paid
+    invoice with a zero balance and a "Pay ₹0.00" button.
+
+    `DEMO_TOKENS` in the environment names them explicitly once the ledger has been
+    eyeballed; absent that, the clearest chase cases stand in - the most overdue invoices
+    with a live balance. A knob, not a hardcode, because which cases tell the story is a
+    human's call.
     """
+    _hydrate_invoices()
     override = os.getenv("DEMO_TOKENS", "").strip()
     if override:
-        return [t.strip() for t in override.split(",") if t.strip() in INVOICES]
+        named = [t.strip() for t in override.split(",") if t.strip() in INVOICES]
+        if named:
+            return named
     chaseable = [
         t for t, inv in INVOICES.items()
         if inv["status"] == "OVERDUE" and _balance_paise(inv) > 0
@@ -137,7 +146,22 @@ def _demo_tokens() -> list[str]:
     return chaseable[:3]
 
 
-DEMO_TOKENS: list[str] = _demo_tokens()
+def demo_token() -> str:
+    """The one resolution page the global nav links to from every surface.
+
+    A callable, because base.html renders on pages whose routes know nothing about the
+    ledger, and because a token pinned at import 404s the moment the ledger is
+    regenerated - which is exactly what a hardcoded `INV-101` did.
+    """
+    live = demo_tokens()
+    return live[0] if live else next(iter(INVOICES), "")
+
+
+templates.env.globals["demo_token"] = demo_token
+
+# How many review-queue rows the console renders inline. Each row embeds a full drafted
+# message body, so the page grows by kilobytes per item; the API serves the rest.
+OPERATOR_QUEUE_PAGE_SIZE = 25
 
 
 # The debtor-facing bounds. Kept together and above the page that publishes them into the
@@ -290,7 +314,7 @@ def suppress_on_settlement(token: str, invoice: dict, payment_id: str, amount_pa
 
     A partial capture credits what arrived and records the balance still owed, so the
     strategist's live projection resumes on the remainder rather than the face value. A
-    capture that clears the balance halts the ladder — the Razorpay differentiator: the money
+    capture that clears the balance halts the ladder â€” the Razorpay differentiator: the money
     lands on the rail the agent controls, so chasing stops here, not on the next sweep.
     """
     with _SETTLEMENT_LOCK:
@@ -367,7 +391,7 @@ def health() -> dict[str, object]:
 def index(request: Request) -> HTMLResponse:
     rows = [
         {"token": t, "amount_display": format_inr(_balance_paise(INVOICES[t])), **INVOICES[t]}
-        for t in DEMO_TOKENS
+        for t in demo_tokens()
     ]
     return templates.TemplateResponse(request, "index.html", {"invoices": rows})
 
@@ -889,7 +913,7 @@ ARCHETYPE_DETAILS: dict[int, dict[str, str]] = {
     },
     5: {
         "archetype": "VIP Relationship Protection (<5% Exposure)",
-        "debtor_profile": "Strategic enterprise buyer with ₹8.4 Cr annual turnover and <5% portfolio exposure. Minor invoice timing friction.",
+        "debtor_profile": "Strategic enterprise buyer with â‚¹8.4 Cr annual turnover and <5% portfolio exposure. Minor invoice timing friction.",
         "why_baseline_erred": "Applied rigid calendar dunning ladder and sent abrasive escalation notice, jeopardizing multi-crore enterprise contract over minor timing friction.",
         "why_agent_won": "Policy envelope enforced VIP relationship protection, barring abrasive dunning and routing to polite collaborative reconciliation.",
     },

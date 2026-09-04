@@ -1,29 +1,279 @@
 {% extends "base.html" %}
-{% block title %}Recovery agent, demo invoices{% endblock %}
+
+{% block title %}Recovery Agent | AI Buildathon{% endblock %}
+
+{% block nav_home %}active{% endblock %}
+{% block wrap_class %}{% endblock %}
+
+{% block head %}
+<style>
+/* Page-specific styles using base variables */
+.hero {
+    text-align: center;
+    padding: 60px 20px;
+    margin-bottom: 40px;
+}
+.hero h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin: 20px 0 16px;
+    letter-spacing: -0.02em;
+    color: var(--text);
+    line-height: 1.2;
+}
+.hero p {
+    font-size: 1.2rem;
+    color: var(--muted);
+    max-width: 800px;
+    margin: 0 auto 30px;
+    line-height: 1.6;
+}
+.differentiators {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 24px;
+    margin-bottom: 60px;
+}
+.diff-card {
+    display: flex;
+    flex-direction: column;
+    padding: 24px;
+}
+.diff-icon {
+    font-size: 28px;
+    margin-bottom: 16px;
+    color: var(--accent);
+}
+.diff-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 12px;
+    color: var(--text);
+}
+.diff-text {
+    font-size: 0.95rem;
+    color: var(--muted);
+    line-height: 1.5;
+}
+.pipeline {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 60px;
+    overflow-x: auto;
+    padding-bottom: 20px;
+}
+.pipeline-step {
+    flex: 1;
+    min-width: 140px;
+    text-align: center;
+    position: relative;
+    padding: 0 10px;
+}
+.pipeline-step:not(:last-child)::after {
+    content: "\2192";
+    position: absolute;
+    right: -10px;
+    top: 20px;
+    color: var(--muted);
+    font-size: 20px;
+}
+.step-pill {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    font-weight: 500;
+    font-size: 0.9rem;
+    margin-bottom: 12px;
+    display: inline-block;
+    color: var(--text);
+}
+.step-desc {
+    font-size: 0.85rem;
+    color: var(--muted);
+    line-height: 1.4;
+}
+.section-title {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin-bottom: 24px;
+    color: var(--text);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 12px;
+}
+.quick-jump {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 60px;
+}
+.jump-card {
+    text-decoration: none;
+    padding: 20px;
+    transition: transform 0.2s, border-color 0.2s;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    display: block;
+}
+.jump-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--accent);
+}
+.jump-title {
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.jump-desc {
+    font-size: 0.85rem;
+    color: var(--muted);
+}
+.invoice-table-wrapper {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow-x: auto;
+}
+.invoice-table {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: left;
+}
+.invoice-table th, .invoice-table td {
+    padding: 16px;
+    border-bottom: 1px solid var(--border);
+}
+.invoice-table th {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.invoice-table tr:last-child td {
+    border-bottom: none;
+}
+.invoice-table tbody tr {
+    transition: background-color 0.2s;
+}
+.invoice-table tbody tr:hover {
+    background-color: var(--bg);
+}
+.amount {
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+}
+.btn-sm {
+    padding: 6px 12px;
+    text-decoration: none;
+    font-size: 0.85rem;
+    border-radius: var(--radius);
+    display: inline-block;
+    text-align: center;
+}
+</style>
+{% endblock %}
 
 {% block content %}
-<h1>Recovery agent</h1>
-<p class="muted small">
-  A curated sample of invoices from the seeded ledger.
-  Each link is the page a debtor would receive.
-</p>
-
-{% for inv in invoices %}
-<div class="card">
-  <div class="row"><span class="muted">Invoice</span><span>{{ inv.invoice_id }}</span></div>
-  <div class="row"><span class="muted">Debtor</span><span>{{ inv.debtor }}</span></div>
-  <div class="row"><span class="muted">Amount</span><span>&#8377;{{ inv.amount_display }}</span></div>
-  <div class="row"><span class="muted">Overdue</span><span>{{ inv.days_overdue }} days</span></div>
-  <div class="row"><span class="muted">Status</span><span><span class="chip">{{ inv.status }}</span></span></div>
-  <div style="margin-top:14px">
-    <a class="btn" href="/r/{{ inv.token }}">Open the debtor view</a>
-  </div>
+<div class="hero">
+    <span class="badge-indigo">Razorpay AI Buildathon 2026 &middot; Track 03</span>
+    <h1>An AI agent for Indian B2B receivables that decides &mdash; per debtor, not per invoice &mdash; whether to wait, collect, negotiate, reconcile, or escalate.</h1>
+    <p>Measured recovery with a comprehensive audit trail. Built for the nuances of MSME guidelines and India-specific compliance.</p>
 </div>
-{% endfor %}
 
-<p class="muted small">
-  Settlement is confirmed by the Razorpay webhook, not by the browser callback, so the
-  ladder halts even if the payer closes the tab. See <a href="/health">/health</a> for
-  which credentials are configured.
-</p>
+<div class="differentiators">
+    <div class="card diff-card">
+        <div class="diff-icon">&#9632;</div>
+        <div class="diff-title">Restraint</div>
+        <div class="diff-text">The agent knows when NOT to act. WAIT is treated as a first-class strategy. Intelligent suppression prevents unnecessary friction.</div>
+    </div>
+    <div class="card diff-card">
+        <div class="diff-icon">&#9672;</div>
+        <div class="diff-title">India Correctness</div>
+        <div class="diff-text">TDS reconciliation, MSMED s.15/16, Section 43B(h), Udyam eligibility gate. The agent strictly avoids citing statutes when the merchant is ineligible.</div>
+    </div>
+    <div class="card diff-card">
+        <div class="diff-icon">&#9650;</div>
+        <div class="diff-title">Counterfactual</div>
+        <div class="diff-text">Evaluated against a baseline on an identical seed. Real, measured delta in recovery performance, not fabricated metrics.</div>
+    </div>
+</div>
+
+<h2 class="section-title">How It Works</h2>
+<div class="pipeline">
+    <div class="pipeline-step">
+        <div class="step-pill">Seeded Ledger</div>
+        <div class="step-desc">Ingest raw invoices &amp; debtor history</div>
+    </div>
+    <div class="pipeline-step">
+        <div class="step-pill">Policy Envelope</div>
+        <div class="step-desc">Apply hard compliance constraints</div>
+    </div>
+    <div class="pipeline-step">
+        <div class="step-pill">AI Strategist</div>
+        <div class="step-desc">Determine action per debtor</div>
+    </div>
+    <div class="pipeline-step">
+        <div class="step-pill">Channel Dispatch</div>
+        <div class="step-desc">Execute communications</div>
+    </div>
+    <div class="pipeline-step">
+        <div class="step-pill">Settlement Suppression</div>
+        <div class="step-desc">Pause active collection upon payment</div>
+    </div>
+</div>
+
+<h2 class="section-title">Quick Jump Navigation</h2>
+<div class="quick-jump">
+    <a href="/results" class="jump-card">
+        <div class="jump-title">&#8594; Results &amp; Benchmark</div>
+        <div class="jump-desc">View the counterfactual analysis</div>
+    </a>
+    <a href="/operator" class="jump-card">
+        <div class="jump-title">&#8594; Operator Console</div>
+        <div class="jump-desc">Monitor and manage agent activity</div>
+    </a>
+    <a href="/r/{{ demo_token() }}" class="jump-card">
+        <div class="jump-title">&#8594; Live Resolution Demo</div>
+        <div class="jump-desc">Experience a debtor interaction</div>
+    </a>
+</div>
+
+<h2 class="section-title">Demo Invoices</h2>
+{% if invoices %}
+<div class="invoice-table-wrapper">
+    <table class="invoice-table">
+        <thead>
+            <tr>
+                <th>Invoice ID</th>
+                <th>Debtor</th>
+                <th>Amount</th>
+                <th>Days Overdue</th>
+                <th>Status</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for inv in invoices %}
+            <tr>
+                <td style="font-weight: 500; color: var(--text);">{{ inv.invoice_id }}</td>
+                <td>{{ inv.debtor }}</td>
+                <td class="amount">{{ inv.amount_display }}</td>
+                <td>{{ inv.days_overdue }}</td>
+                <td><span class="chip">{{ inv.status }}</span></td>
+                <td><a href="/r/{{ inv.token }}" class="btn-primary btn-sm">View</a></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<p style="color: var(--muted);">No demo invoices available at the moment.</p>
+{% endif %}
+
 {% endblock %}

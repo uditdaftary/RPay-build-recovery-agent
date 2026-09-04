@@ -1,12 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Evaluation Benchmark & Counterfactual - B2B Recovery Agent{% endblock %}
-{% block content %}
+{% block title %}Evaluation Benchmark and Counterfactual | B2B Recovery Agent{% endblock %}
+{% block nav_results %}active{% endblock %}
+{% block nav_operator_key %}{% if operator_key %}?key={{ operator_key }}{% endif %}{% endblock %}
+{% block head %}
 <style>
-  .wrap { max-width: 1200px !important; padding: 24px 20px 80px; }
-  .nav-link { color: #64748b; text-decoration: none; padding: 6px 12px; border-radius: 6px; font-size: 13px; font-weight: 500; transition: all 0.15s; }
-  .nav-link:hover { color: #0f172a; background: #f1f5f9; }
-  .nav-link.active { color: #4338ca; background: #e0e7ff; font-weight: 600; }
-  
   .card-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -16,50 +13,41 @@
   .stat-card {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: var(--radius-lg);
     padding: 16px 20px;
     position: relative;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow 0.2s, transform 0.2s;
+  }
+  .stat-card:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-1px);
   }
   .stat-card-title {
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: #64748b;
+    letter-spacing: 0.06em;
+    color: var(--muted);
     margin-bottom: 6px;
     display: flex;
     justify-content: space-between;
     align-items: center;
   }
   .stat-card-val {
-    font-size: 22px;
+    font-size: 24px;
     font-weight: 700;
-    color: #0f172a;
+    color: var(--text);
     letter-spacing: -0.02em;
     line-height: 1.2;
+    font-feature-settings: 'tnum' 1;
   }
   .stat-card-sub {
     font-size: 12px;
-    color: #64748b;
+    color: var(--muted);
     margin-top: 6px;
-    line-height: 1.4;
+    line-height: 1.45;
   }
-  .badge-pill {
-    font-size: 11px;
-    font-weight: 600;
-    padding: 2px 8px;
-    border-radius: 9999px;
-    display: inline-block;
-  }
-  .badge-indigo { background: #e0e7ff; color: #4338ca; }
-  .badge-emerald { background: #dcfce7; color: #15803d; }
-  .badge-rose { background: #ffe4e6; color: #be123c; }
-  .badge-amber { background: #fef3c7; color: #b45309; }
-  .badge-slate { background: #f1f5f9; color: #475569; }
-  .badge-cyan { background: #cffafe; color: #0e7490; }
-  .badge-purple { background: #f3e8ff; color: #7e22ce; }
-  .badge-blue { background: #dbeafe; color: #1d4ed8; }
 
   .strat-bar-wrap {
     display: flex;
@@ -71,7 +59,7 @@
   .strat-name {
     width: 170px;
     font-weight: 600;
-    color: #334155;
+    color: var(--text-secondary);
     flex-shrink: 0;
   }
   .bar-container {
@@ -88,34 +76,34 @@
   }
   .bar-label {
     width: 54px;
-    color: #64748b;
+    color: var(--muted);
     font-weight: 500;
     flex-shrink: 0;
   }
   .bar-track {
     flex-grow: 1;
-    background: #f1f5f9;
+    background: var(--border-subtle);
     height: 14px;
     border-radius: 4px;
     overflow: hidden;
     position: relative;
   }
   .bar-fill-agent {
-    background: #4f46e5;
+    background: var(--accent);
     height: 100%;
     border-radius: 4px;
-    transition: width 0.4s ease;
+    transition: width 0.6s cubic-bezier(0.4,0,0.2,1);
   }
   .bar-fill-baseline {
-    background: #e11d48;
+    background: var(--danger);
     height: 100%;
     border-radius: 4px;
-    transition: width 0.4s ease;
+    transition: width 0.6s cubic-bezier(0.4,0,0.2,1);
   }
   .bar-val {
     width: 60px;
     font-weight: 600;
-    color: #0f172a;
+    color: var(--text);
   }
 
   .matrix-table {
@@ -125,11 +113,14 @@
     text-align: left;
   }
   .matrix-table th {
-    background: #f8fafc;
+    background: var(--bg);
     padding: 12px 14px;
     border-bottom: 2px solid var(--border);
-    color: #475569;
+    color: var(--muted);
     font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
   }
   .matrix-table td {
     padding: 12px 14px;
@@ -141,10 +132,10 @@
     transition: background 0.15s;
   }
   .matrix-row-main:hover {
-    background: #f8fafc;
+    background: var(--border-subtle);
   }
   .matrix-row-details {
-    background: #fcfcfc;
+    background: var(--bg);
     display: none;
   }
   .matrix-row-details.open {
@@ -156,22 +147,21 @@
     grid-template-columns: 1fr 1fr;
     gap: 16px;
     padding: 16px 20px;
-    background: #ffffff;
-    border: 1px solid #e2e8f0;
-    border-radius: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
     margin: 8px 0;
   }
   @media (max-width: 768px) {
     .details-box { grid-template-columns: 1fr; }
   }
 
-  /* Modal Styling */
   .modal-overlay {
     display: none;
     position: fixed;
     top: 0; left: 0; right: 0; bottom: 0;
     background: rgba(15, 23, 42, 0.65);
-    backdrop-filter: blur(2px);
+    backdrop-filter: blur(4px);
     z-index: 1000;
     align-items: center;
     justify-content: center;
@@ -181,71 +171,60 @@
     display: flex;
   }
   .modal-card {
-    background: #ffffff;
-    border-radius: 12px;
+    background: var(--surface);
+    border-radius: var(--radius-lg);
     max-width: 680px;
     width: 100%;
     max-height: 90vh;
     overflow-y: auto;
-    box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1);
-    border: 1px solid #e2e8f0;
+    box-shadow: 0 20px 25px -5px rgba(0,0,0,0.15), 0 8px 10px -6px rgba(0,0,0,0.1);
+    border: 1px solid var(--border);
   }
 </style>
-
-<!-- Top Navbar -->
-<nav style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 16px; margin-bottom: 24px; border-bottom: 1px solid #e2e8f0;">
-  <div style="display: flex; align-items: center; gap: 12px;">
-    <span style="font-size: 15px; font-weight: 700; color: #0f172a; letter-spacing: -0.01em;">B2B Receivables Recovery</span>
-    <span class="badge-pill badge-indigo">Benchmark Intelligence</span>
-  </div>
-  <div style="display: flex; gap: 8px; align-items: center;">
-    <a href="/operator{% if operator_key %}?key={{ operator_key }}{% endif %}" class="nav-link">Operator Queue</a>
-    <a href="/results" class="nav-link active">Results &amp; Benchmark</a>
-    <a href="/r/INV-101" target="_blank" rel="noopener noreferrer" class="nav-link">Demo Token (/r/INV-101) &nearr;</a>
-  </div>
-</nav>
+{% endblock %}
+{% block content %}
 
 <!-- Header & Title -->
 <div style="margin-bottom: 20px;">
   <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px;">
     <div>
-      <h1 style="font-size: 22px; font-weight: 700; color: #0f172a; margin: 0 0 4px 0; letter-spacing: -0.02em;">
+      <h1 style="font-size: 22px; margin: 0 0 4px 0;">
         Evaluation Benchmark &amp; Counterfactual Analysis
       </h1>
-      <p style="margin: 0; color: #64748b; font-size: 13px;">
+      <p style="margin: 0; color: var(--muted); font-size: 13px;">
         Head-to-head empirical evaluation of AI Recovery Strategist vs Static Calendar Baseline Policy across 70 invoices &amp; 20 debtors.
       </p>
     </div>
     <div style="display: flex; gap: 8px; align-items: center;">
       <span class="chip" style="font-size: 12px;">RNG Seed: <strong>{{ seed }}</strong></span>
       <span class="chip" style="font-size: 12px;">As-Of: <strong>{{ as_of }}</strong></span>
-      <span class="chip badge-emerald" style="font-size: 12px;">{% if live_llm %}Live LLM (Gemini){% else %}Deterministic Evaluator (Mock){% endif %}</span>
+      <span class="badge badge-emerald" style="font-size: 12px;">{% if live_llm %}Live LLM (Gemini){% else %}Deterministic Evaluator (Mock){% endif %}</span>
     </div>
   </div>
 </div>
 
 <!-- Section 4: Live Execution Controls -->
-<div class="card" style="margin-bottom: 24px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px 20px;">
+<div class="card" style="margin-bottom: 24px;">
   <form id="eval-form" method="GET" action="/results" style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end;">
     <div style="flex: 1; min-width: 140px;">
-      <label style="display: block; font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 4px;">Ledger Seed</label>
-      <input type="number" id="input-seed" name="seed" value="{{ seed }}" style="margin: 0; padding: 7px 10px; font-size: 13px; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 6px;">
+      <label for="input-seed">Ledger Seed</label>
+      <input type="number" id="input-seed" name="seed" value="{{ seed }}" style="margin: 0;">
     </div>
     <div style="flex: 1; min-width: 160px;">
-      <label style="display: block; font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 4px;">As-Of Date</label>
-      <input type="date" id="input-as-of" name="as_of" value="{{ as_of }}" style="margin: 0; padding: 7px 10px; font-size: 13px; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 6px;">
+      <label for="input-as-of">As-Of Date</label>
+      <input type="date" id="input-as-of" name="as_of" value="{{ as_of }}" style="margin: 0;">
     </div>
     <div style="display: flex; align-items: center; gap: 8px; padding-bottom: 6px;">
       <input type="checkbox" id="input-live-llm" name="live_llm" value="true" {% if live_llm %}checked{% endif %} style="width: auto; margin: 0; cursor: pointer;">
-      <label for="input-live-llm" style="font-size: 13px; font-weight: 500; color: #334155; cursor: pointer; user-select: none;">
+      <label for="input-live-llm" style="margin: 0; cursor: pointer; user-select: none;">
         Live LLM Chain (Gemini API)
       </label>
     </div>
     <div style="display: flex; gap: 8px;">
-      <button type="submit" id="btn-submit-eval" class="btn btn-primary" style="background: #4f46e5; border-color: #4338ca; color: #ffffff; font-weight: 600; font-size: 13px; padding: 8px 18px;">
+      <button type="submit" id="btn-submit-eval" class="btn-primary" style="padding: 8px 18px;">
         Re-run Evaluation
       </button>
-      <a href="/results?seed=42&as_of=2026-08-26" class="btn btn-secondary" style="font-size: 13px; padding: 8px 14px; text-decoration: none;">
+      <a href="/results?seed=42&as_of=2026-08-26" class="btn" style="padding: 8px 14px;">
         Reset (Seed 42)
       </a>
     </div>
@@ -254,7 +233,7 @@
 
 <!-- Section 1: Portfolio Overview & Headline Delta Cards -->
 <div style="margin-bottom: 24px;">
-  <h2 style="font-size: 15px; font-weight: 700; color: #0f172a; margin-bottom: 12px; letter-spacing: -0.01em;">
+  <h2 style="font-size: 15px; margin-bottom: 12px;">
     Portfolio Overview &amp; Headline Benchmark Metrics
   </h2>
   
@@ -277,7 +256,7 @@
         <span>True Collectible Balance</span>
         <span class="badge-pill badge-indigo">Net of Deductions</span>
       </div>
-      <div class="stat-card-val" style="color: #4338ca;">{{ portfolio.total_collectible_inr }}</div>
+      <div class="stat-card-val" style="color: var(--accent);">{{ portfolio.total_collectible_inr }}</div>
       <div class="stat-card-sub">
         vs {{ portfolio.total_naive_outstanding_inr }} Naive Outstanding (Prevents ₹1.46L wrongful TDS dunning)
       </div>
@@ -289,9 +268,9 @@
         <span>WAIT Restraint Share</span>
         <span class="badge-pill badge-emerald">Noise Reduction</span>
       </div>
-      <div class="stat-card-val" style="color: #15803d;">
+      <div class="stat-card-val" style="color: var(--success);">
         {{ comparative_metrics.agent_wait_restraint_pct }}%
-        <span style="font-size: 14px; font-weight: 500; color: #64748b;">vs {{ comparative_metrics.baseline_wait_restraint_pct }}% Base</span>
+        <span style="font-size: 14px; font-weight: 500; color: var(--muted);">vs {{ comparative_metrics.baseline_wait_restraint_pct }}% Base</span>
       </div>
       <div class="stat-card-sub">
         <strong>{{ comparative_metrics.agent_wait_restraint_count }}/{{ comparative_metrics.total_evaluated_debtors }} accounts</strong> held back under reliable payer &amp; opt-out policy
@@ -347,21 +326,21 @@
 <div class="card" style="margin-bottom: 24px; padding: 20px 24px;">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
     <div>
-      <h2 style="font-size: 15px; font-weight: 700; color: #0f172a; margin: 0 0 2px 0;">
+      <h2 style="font-size: 15px; margin: 0 0 2px 0;">
         Visual Strategy Distribution: AI Agent vs Calendar Baseline
       </h2>
-      <p style="margin: 0; color: #64748b; font-size: 12px;">
+      <p style="margin: 0; color: var(--muted); font-size: 12px;">
         Action breakdown demonstrating dynamic multi-door routing vs single-track calendar escalation
       </p>
     </div>
     <div style="display: flex; gap: 12px; font-size: 12px;">
       <div style="display: flex; align-items: center; gap: 6px;">
-        <span style="width: 12px; height: 12px; background: #4f46e5; border-radius: 3px; display: inline-block;"></span>
-        <span style="font-weight: 600; color: #334155;">AI Recovery Agent</span>
+        <span style="width: 12px; height: 12px; background: var(--accent); border-radius: 3px; display: inline-block;"></span>
+        <span style="font-weight: 600; color: var(--text-secondary);">AI Recovery Agent</span>
       </div>
       <div style="display: flex; align-items: center; gap: 6px;">
-        <span style="width: 12px; height: 12px; background: #e11d48; border-radius: 3px; display: inline-block;"></span>
-        <span style="font-weight: 600; color: #334155;">Calendar Baseline</span>
+        <span style="width: 12px; height: 12px; background: var(--danger); border-radius: 3px; display: inline-block;"></span>
+        <span style="font-weight: 600; color: var(--text-secondary);">Calendar Baseline</span>
       </div>
     </div>
   </div>
@@ -425,16 +404,16 @@
 <div class="card" style="padding: 20px 24px;">
   <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px; margin-bottom: 16px;">
     <div>
-      <h2 style="font-size: 16px; font-weight: 700; color: #0f172a; margin: 0 0 2px 0;">
+      <h2 style="font-size: 16px; margin: 0 0 2px 0;">
         Hard-Case Adjudication Matrix (8 Curated Archetypes)
       </h2>
-      <p style="margin: 0; color: #64748b; font-size: 13px;">
+      <p style="margin: 0; color: var(--muted); font-size: 13px;">
         Head-to-head decision audits across commercial edge cases. Click any debtor row to expand deep causal reasoning &amp; drafted copy previews.
       </p>
     </div>
     <div style="display: flex; gap: 8px;">
-      <button id="btn-expand-all" class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px;">Expand All Details</button>
-      <button id="btn-collapse-all" class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px;">Collapse All</button>
+      <button id="btn-expand-all" class="btn" style="font-size: 12px; padding: 6px 12px;">Expand All Details</button>
+      <button id="btn-collapse-all" class="btn" style="font-size: 12px; padding: 6px 12px;">Collapse All</button>
     </div>
   </div>
 
@@ -454,23 +433,23 @@
         <!-- Main Row -->
         <tr class="matrix-row-main" data-debtor-id="{{ item.debtor_id }}">
           <td>
-            <div style="font-weight: 700; color: #0f172a; font-size: 14px;">{{ item.debtor_name }}</div>
-            <div style="color: #64748b; font-size: 12px; margin-top: 2px;">
-              <span style="font-family: monospace; font-weight: 600; color: #475569;">{{ item.debtor_id }}</span> &bull; 
-              <span style="color: #334155; font-weight: 500;">{{ item.archetype | default(item.case_name) }}</span>
+            <div style="font-weight: 700; color: var(--text); font-size: 14px;">{{ item.debtor_name }}</div>
+            <div style="color: var(--muted); font-size: 12px; margin-top: 2px;">
+              <span class="font-mono" style="font-weight: 600; color: var(--text-secondary);">{{ item.debtor_id }}</span> &bull; 
+              <span style="color: var(--text-secondary); font-weight: 500;">{{ item.archetype | default(item.case_name) }}</span>
             </div>
           </td>
           <td>
-            <div style="color: #be123c; font-family: monospace; font-size: 12px; font-weight: 600;">
+            <div style="color: var(--danger); font-family: ui-monospace, monospace; font-size: 12px; font-weight: 600;">
               {{ item.baseline_action }}
             </div>
-            <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">Single-track calendar dunning</div>
+            <div style="font-size: 11px; color: var(--muted); margin-top: 2px;">Single-track calendar dunning</div>
           </td>
           <td>
-            <div style="color: #4338ca; font-family: monospace; font-size: 12px; font-weight: 600;">
+            <div style="color: var(--accent); font-family: ui-monospace, monospace; font-size: 12px; font-weight: 600;">
               {{ item.agent_action }}
             </div>
-            <div style="font-size: 11px; color: #64748b; margin-top: 2px;">
+            <div style="font-size: 11px; color: var(--muted); margin-top: 2px;">
               Policy Envelope calibrated
             </div>
           </td>
