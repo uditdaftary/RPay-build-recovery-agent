@@ -159,10 +159,6 @@ def demo_token() -> str:
 
 templates.env.globals["demo_token"] = demo_token
 
-# How many review-queue rows the console renders inline. Each row embeds a full drafted
-# message body, so the page grows by kilobytes per item; the API serves the rest.
-OPERATOR_QUEUE_PAGE_SIZE = 25
-
 
 # The debtor-facing bounds. Kept together and above the page that publishes them into the
 # form, so a reader of resolution_page can see what limits it is rendering.
@@ -314,7 +310,7 @@ def suppress_on_settlement(token: str, invoice: dict, payment_id: str, amount_pa
 
     A partial capture credits what arrived and records the balance still owed, so the
     strategist's live projection resumes on the remainder rather than the face value. A
-    capture that clears the balance halts the ladder â€” the Razorpay differentiator: the money
+    capture that clears the balance halts the ladder — the Razorpay differentiator: the money
     lands on the rail the agent controls, so chasing stops here, not on the next sweep.
     """
     with _SETTLEMENT_LOCK:
@@ -827,6 +823,10 @@ def operator_dashboard(request: Request) -> HTMLResponse:
             "kill_switch_active": is_kill_switch_active(),
             "queue": get_review_queue(),
             "operator_key": key,
+            # The decision log the console renders is the audit log itself, newest first.
+            # Bounded because the page is server-rendered and the log grows per run.
+            "decisions": [r for r in audit.read_all() if r.get("event") == "decision.made"][-25:][::-1],
+            "audit_log_ephemeral": audit.ephemeral_fallback_active(),
         },
     )
 
@@ -913,7 +913,7 @@ ARCHETYPE_DETAILS: dict[int, dict[str, str]] = {
     },
     5: {
         "archetype": "VIP Relationship Protection (<5% Exposure)",
-        "debtor_profile": "Strategic enterprise buyer with â‚¹8.4 Cr annual turnover and <5% portfolio exposure. Minor invoice timing friction.",
+        "debtor_profile": "Strategic enterprise buyer with ₹8.4 Cr annual turnover and <5% portfolio exposure. Minor invoice timing friction.",
         "why_baseline_erred": "Applied rigid calendar dunning ladder and sent abrasive escalation notice, jeopardizing multi-crore enterprise contract over minor timing friction.",
         "why_agent_won": "Policy envelope enforced VIP relationship protection, barring abrasive dunning and routing to polite collaborative reconciliation.",
     },
