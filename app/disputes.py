@@ -70,7 +70,7 @@ _CATEGORY_PATTERNS: tuple[tuple[DisputeCategory, re.Pattern[str]], ...] = (
         _roots(
             r"\bneft", r"\brtgs", r"\bimps", r"\butr\b", r"\bupi\b", r"\bnach\b",
             r"already (paid|settled|cleared|remitted|reconciled|made)",
-            r"paid (in full|via|by|vide|through)",
+            r"paid (in full|via|by|vide|through)", r"\bpaid on\b",
             r"payment (made|done|sent|released|processed|remitted|effected)",
             r"\bremitt", r"cheque (no|number|dated|issued|sent|cleared)", r"demand draft",
             r"\bdd no\b", r"transaction (id|ref|reference|number)", r"\btxn\b",
@@ -105,7 +105,8 @@ _CATEGORY_PATTERNS: tuple[tuple[DisputeCategory, re.Pattern[str]], ...] = (
         DisputeCategory.WRONG_RECIPIENT,
         _roots(
             r"wrong (entity|compan|firm|subsidiar|branch|division|address|party|"
-            r"business|unit\b|legal entity|department|gstin)",
+            r"business|unit\b|legal entity|department|gstin|recipient)",
+            r"subsidiary entity",
             r"not our (compan|invoice|bill|order|purchase|dues|liability|account)",
             r"not (addressed|meant|intended|billed) (to|for) us",
             r"different (entity|compan|legal entity|firm|gstin)",
@@ -161,7 +162,7 @@ _CATEGORY_PATTERNS: tuple[tuple[DisputeCategory, re.Pattern[str]], ...] = (
             r"\bshortfall", r"\bshortage", r"under[- ]?(deliver|suppl|shipp)",
             r"less (quantity|units|material|stock)", r"fewer (unit|item|piece|quantit)",
             r"missing (unit|item|piece|quantit|goods|stock|material|part|box|carton)",
-            r"units (short|missing|less|not received)",
+            r"units (short|missing|less|received|not received)",
             r"not (yet )?(received|delivered)",
             r"never (received|delivered|arrived|got|reached|came)",
             r"nothing (was )?(received|delivered|arrived)",
@@ -174,7 +175,8 @@ _CATEGORY_PATTERNS: tuple[tuple[DisputeCategory, re.Pattern[str]], ...] = (
             r"quality|batch|make|variant)",
             r"not as per (spec|sample|drawing|order|description|approved)",
             r"sub[- ]?standard", r"(poor|bad|inferior|low) quality",
-            r"quality (issue|problem|concern|fail|not|is)", r"\bdefect", r"\bfaulty",
+            r"quality (issue|problem|concern|fail|not|is)", r"\bquality\b",
+            r"\bdefect", r"\bfaulty",
             r"\bbroken", r"\bdamage", r"spoil", r"\bexpired", r"\brejected", r"\brejection",
             r"failed (qc|inspection|testing|quality)", r"qc fail",
             r"not (usable|working|functioning)", r"does ?n'?t work", r"stopped working",
@@ -206,6 +208,13 @@ def classify_dispute_reason(reason_text: str | None) -> DisputeCategory:
 def recompute_statutory_dates_on_dispute(
     delivery_date: date,
     written_agreement: bool,
+
+    Widening a keyword list can narrow it: moving to roots silently dropped "paid on",
+    "wrong recipient", "subsidiary entity", "units received" and a bare "quality", all of
+    which the exact-phrase lists had matched, and a debtor asserting they had already paid
+    was left holding the UNKNOWN evidence checklist. Those five are pinned by
+    ``test_dispute_classification_no_phrasing_lost_to_roots``; anything taken out of this
+    table needs the same treatment.
     objection_date: date,
     resolution_date: date | None = None,
 ) -> tuple[date | None, date | None, date | None]:

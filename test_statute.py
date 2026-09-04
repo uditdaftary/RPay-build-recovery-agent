@@ -407,15 +407,59 @@ class TestStatuteAndDisputes(unittest.TestCase):
         )
 
     def test_dispute_classification_regression_lock_seeded_ledger(self) -> None:
-        """The three dispute reasons seeded into data/ledger.json must not drift category."""
-        self.assertEqual(
-            classify_dispute_reason("We already settled this by NEFT on 12 August, UTR 511923447"),
-            DisputeCategory.ALREADY_PAID,
-        )
-        self.assertEqual(
-            classify_dispute_reason("GST rate applied is 18 percent, our contract says 12 percent"),
-            DisputeCategory.TAX_GST,
-        )
+        """The dispute reasons seeded into data/ledger.json must not drift category.
+
+        Read out of the ledger rather than restated here. Restating them locked three
+        strings instead of the file: regenerate the ledger with different reasons and a
+        hardcoded copy still passes, on wording nothing in the system uses any more -
+        the same way a pinned `INV-101` outlived the invoice it named.
+        """
+        ledger = json.loads((PROJECT_ROOT / "data" / "ledger.json").read_text(encoding="utf-8"))
+        seeded = {
+            invoice["dispute_reason"]
+            for invoice in ledger["invoices"]
+            if invoice.get("dispute_reason")
+        }
+        expected = {
+            "We already settled this by NEFT on 12 August, UTR 511923447": DisputeCategory.ALREADY_PAID,
+            "GST rate applied is 18 percent, our contract says 12 percent": DisputeCategory.TAX_GST,
+            "This invoice appears to duplicate INV-3902": DisputeCategory.DUPLICATE,
+        }
+        # Fails loudly when the ledger gains, loses or rewords a reason, so the lock has
+        # to be updated deliberately rather than quietly going stale.
+        self.assertEqual(seeded, set(expected), "the seeded dispute reasons have changed")
+        for reason, category in expected.items():
+            self.assertEqual(classify_dispute_reason(reason), category, reason)
+
+    def test_dispute_classification_no_phrasing_lost_to_roots(self) -> None:
+        """Phrasings the exact-phrase lists matched, which the move to roots dropped.
+
+        Every one of these classified correctly before the rewrite and regressed to
+        UNKNOWN after it - "paid on" worst of all, because it left a debtor asserting
+        settlement on the generic checklist instead of the UTR / bank-statement one.
+        A widening pass is allowed to add categories; it is not allowed to lose them.
+        """
+        cases: list[tuple[str, DisputeCategory]] = [
+            ("Paid on 12 August 2026, please check.", DisputeCategory.ALREADY_PAID),
+            ("paid on", DisputeCategory.ALREADY_PAID),
+            ("Wrong recipient - please redirect this invoice.", DisputeCategory.WRONG_RECIPIENT),
+            ("wrong recipient", DisputeCategory.WRONG_RECIPIENT),
+            ("This belongs to our subsidiary entity, not us.", DisputeCategory.WRONG_RECIPIENT),
+            ("40 units billed, 32 units received against the PO.", DisputeCategory.GOODS_SERVICES),
+            ("units received", DisputeCategory.GOODS_SERVICES),
+            ("The quality was terrible and we are not paying.", DisputeCategory.GOODS_SERVICES),
+            ("quality", DisputeCategory.GOODS_SERVICES),
+        ]
+        for reason, expected in cases:
+            self.assertEqual(classify_dispute_reason(reason), expected, reason)
+
+    def test_a_passing_mention_does_not_outrank_the_actual_claim(self) -> None:
+        """A category above GOODS_SERVICES must match a claim, not a word in passing.
+
+        `\btax` sat third in the table and matched any sentence containing "tax", so an
+        explicit short-delivery complaint was classified TAX_GST and the debtor was asked
+        for a GSTR-2B mismatch certificate instead of an inspection report.
+        """
         self.assertEqual(
             classify_dispute_reason("This invoice appears to duplicate INV-3902"),
             DisputeCategory.DUPLICATE,
