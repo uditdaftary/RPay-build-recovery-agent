@@ -160,7 +160,9 @@ def read_recent(event: str, limit: int) -> list[dict[str, Any]]:
     `read_all` exists for the envelope, which needs every row and must refuse to read a
     log that has lost data. A display surface needs neither: the operator console shows
     25 decisions out of a log that grows by one per decision per run, so bounding it at
-    the source keeps both the read and the parse proportional to what is rendered.
+    the source keeps the parse proportional to what is rendered. On the database this
+    bounds the read too, since the filter and the LIMIT are pushed into SQL; the file
+    fallback still scans the whole log line by line, but only parses the matching tail.
 
     Deliberately softer than `read_all` about a corrupt row. This feeds a page, not a
     decision, and a single bad line taking down the console is a worse outcome than a
