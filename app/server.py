@@ -851,8 +851,9 @@ def operator_dashboard(request: Request) -> HTMLResponse:
             "queue_total": len(queue),
             "operator_key": key,
             # The decision log the console renders is the audit log itself, newest first.
-            # Bounded because the page is server-rendered and the log grows per run.
-            "decisions": [r for r in audit.read_all() if r.get("event") == "decision.made"][-25:][::-1],
+            # Read bounded rather than filtered after the fact: the log grows by a row per
+            # decision per run and the page shows 25 of them.
+            "decisions": audit.read_recent("decision.made", OPERATOR_DECISION_LOG_SIZE)[::-1],
             "audit_log_ephemeral": audit.ephemeral_fallback_active(),
         },
     )
