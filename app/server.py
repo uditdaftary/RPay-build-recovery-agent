@@ -813,7 +813,9 @@ class ReviewActionRequest(BaseModel):
 @app.get("/operator", response_class=HTMLResponse)
 def operator_dashboard(request: Request) -> HTMLResponse:
     """Render operator dashboard with live kill switch and review queue."""
-    queue = get_review_queue()
+    # Authenticate before touching the store. Reading the queue first meant every
+    # anonymous request ran an unbounded SELECT over it and only then returned 401,
+    # which is unauthenticated database load on a publicly reachable deployment.
     expected = os.getenv("OPERATOR_API_KEY", "").strip()
     key = _extract_operator_key(request)
     if not expected or not key or not hmac.compare_digest(key, expected):
