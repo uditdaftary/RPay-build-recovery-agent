@@ -18,10 +18,38 @@ from fastapi.testclient import TestClient
 from app.config import business_today
 from app.server import INVOICES, _balance_paise, _load_invoices, _lookup_invoice, app, demo_token
 
+_store_off = None
+
+
+def setUpModule():
+    """No test in this file may reach the durable store.
+
+    Several of these exercise mutating endpoints, and `_persist_invoice` writes through
+    whenever DATABASE_URL is set - which `.env` supplies on a developer machine. That is
+    how a seeded ledger invoice ended up in the shared database carrying a test literal
+    as its dispute reason. Disabling the store also makes the assertions deterministic,
+    since they then read the ledger rather than whatever an earlier session left behind.
+    """
+    global _store_off
+    _store_off = patch("app.store.is_enabled", return_value=False)
+    _store_off.start()
+
+
+def tearDownModule():
+    _store_off.stop()
+
 
 class TestUIResponsivenessAndReactiveness(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(app)
+        # `INVOICES` is process-global and the door tests POST to endpoints that mutate
+        # it, so the next test in the run inherits whatever this one left behind.
+        self._invoice_snapshot = {t: dict(inv) for t, inv in INVOICES.items()}
+
+    def tearDown(self):
+        for token, original in self._invoice_snapshot.items():
+            INVOICES[token].clear()
+            INVOICES[token].update(original)
 
     def test_landing_page_responsive_meta_and_layout(self):
         response = self.client.get("/")
