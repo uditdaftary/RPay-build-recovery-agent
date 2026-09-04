@@ -1,50 +1,279 @@
 {% extends "base.html" %}
-{% block title %}Invoice {{ invoice.invoice_id }}{% endblock %}
+
+{% block wrap_class %}wrap-narrow{% endblock %}
+{% block nav %}{% endblock %}
+{% block footer %}{% endblock %}
 
 {% block content %}
-<h1>{{ invoice.supplier }}</h1>
-<p class="muted small">Invoice {{ invoice.invoice_id }} for {{ invoice.debtor }}</p>
+<style>
+  /* Custom styles for resolution page */
+  .resolution-container {
+    max-width: 600px;
+    margin: 40px auto;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    font-family: 'Inter', sans-serif;
+  }
+  .header-card {
+    text-align: center;
+    padding: 32px 24px;
+    border-radius: var(--radius, 8px);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+  }
+  .supplier-name {
+    font-size: 1.125rem;
+    color: var(--muted);
+    font-weight: 500;
+    margin-bottom: 8px;
+  }
+  .invoice-id {
+    font-size: 0.875rem;
+    color: var(--muted);
+    margin-bottom: 24px;
+  }
+  .amount-huge {
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: var(--text);
+    margin: 16px 0;
+  }
+  
+  .timeline {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 24px;
+    padding: 16px 8px;
+    background: var(--bg);
+    border-radius: var(--radius, 8px);
+    font-size: 0.875rem;
+  }
+  .timeline-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    color: var(--muted);
+    position: relative;
+    flex: 1;
+  }
+  .timeline-step.active {
+    color: var(--text);
+    font-weight: 600;
+  }
+  .timeline-step::after {
+    content: '';
+    position: absolute;
+    top: 5px;
+    right: -50%;
+    width: 100%;
+    height: 2px;
+    background: var(--border);
+    z-index: 1;
+  }
+  .timeline-step:last-child::after {
+    display: none;
+  }
+  .timeline-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--border);
+    margin-bottom: 8px;
+    z-index: 2;
+    position: relative;
+  }
+  .timeline-step.active .timeline-dot {
+    background: var(--accent);
+    box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.2);
+  }
 
-<div class="card">
-  <div class="muted small">Amount outstanding</div>
-  <div class="amount">&#8377;{{ amount_display }}</div>
-  <span class="chip">{{ invoice.days_overdue }} days past due</span>
+  .action-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius, 8px);
+    padding: 24px;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  .action-card:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+  }
+  .action-card h3 {
+    margin-top: 0;
+    margin-bottom: 8px;
+    font-size: 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .action-card p {
+    color: var(--muted);
+    margin-bottom: 16px;
+    font-size: 0.95rem;
+    line-height: 1.5;
+  }
+  .action-form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .form-group label {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--text);
+  }
+  .form-group input, .form-group textarea {
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius, 6px);
+    background: var(--bg);
+    color: var(--text);
+    font-family: inherit;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .btn-huge {
+    width: 100%;
+    padding: 16px;
+    font-size: 1.125rem;
+    font-weight: 600;
+    text-align: center;
+  }
+  .btn-dispute {
+    color: var(--danger, #ef4444);
+    border-color: var(--danger, #ef4444);
+  }
+  .btn-dispute:hover {
+    background: rgba(239, 68, 68, 0.1);
+  }
+  .compliance-note {
+    text-align: center;
+    font-size: 0.75rem;
+    color: var(--muted);
+    margin-top: 8px;
+    padding: 0 16px;
+  }
+  .status {
+    margin-top: 12px;
+    font-size: 0.875rem;
+    padding: 8px 12px;
+    border-radius: 6px;
+    display: none;
+    /* The dispute verdict is two lines: the statutory note, then the evidence needed. */
+    white-space: pre-line;
+  }
+  .status:not(:empty) {
+    display: block;
+  }
+  .status.ok {
+    background: rgba(34, 197, 94, 0.1);
+    color: var(--success, #15803d);
+    border: 1px solid rgba(34, 197, 94, 0.2);
+  }
+  .status.err {
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--danger, #b91c1c);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+  }
+</style>
 
-  <div style="margin-top:18px">
-    <button class="primary" id="pay">Pay &#8377;{{ amount_display }} now</button>
+<div class="resolution-container">
+  <!-- Header Card -->
+  <div class="header-card">
+    <div class="supplier-name">{{ invoice.supplier }}</div>
+    <div class="invoice-id">Invoice #{{ invoice.invoice_id }}</div>
+    
+    <div class="amount-huge">₹{{ amount_display }}</div>
+    
+    {% set overdue_days = invoice.days_overdue|int %}
+    {% if overdue_days < 15 %}
+      {% set badge_class = 'badge-emerald' %}
+    {% elif overdue_days <= 45 %}
+      {% set badge_class = 'badge-amber' %}
+    {% else %}
+      {% set badge_class = 'badge-rose' %}
+    {% endif %}
+    
+    <span class="chip {{ badge_class }}">
+      {{ overdue_days }} Days Overdue
+    </span>
+    
+    <!-- Timeline. The third stage names what happened after the invoice fell overdue, so
+         on an invoice that is only overdue it stays unreached rather than repeating the
+         stage before it. -->
+    {% set outcome = {'PAID': 'Paid', 'PARTIALLY_PAID': 'Part paid', 'PROMISED': 'Date agreed', 'DISPUTED': 'Disputed'}.get(invoice.status) %}
+    <div class="timeline">
+      <div class="timeline-step{% if not outcome %} active{% endif %}">
+        <div class="timeline-dot"></div>
+        <span>Issued</span>
+      </div>
+      <div class="timeline-step{% if not outcome %} active{% endif %}">
+        <div class="timeline-dot"></div>
+        <span>Overdue</span>
+      </div>
+      <div class="timeline-step{% if outcome %} active{% endif %}">
+        <div class="timeline-dot"></div>
+        <span>{{ outcome or 'Resolved' }}</span>
+      </div>
+    </div>
   </div>
-  <div id="pay-status"></div>
-</div>
 
-<div class="card">
-  <h2>Cannot pay today?</h2>
-  <p class="muted small">Tell us when, and we will hold the follow ups until then.</p>
+  <!-- Door 1: Pay Now -->
+  <div class="action-card" id="door-pay">
+    <h3>
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--success, #10b981);"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+      Pay Now
+    </h3>
+    <p>Clear your balance immediately using UPI, Card, or Netbanking.</p>
+    <button id="pay" class="btn-primary btn-huge">Pay ₹{{ amount_display }}</button>
+    <div id="pay-status" class="status"></div>
+  </div>
 
-  <details>
-    <summary>Choose a payment date</summary>
-    <div>
-      <label class="small muted" for="promised-date">Date you expect to pay</label>
-      <input type="date" id="promised-date" min="{{ promise_min }}" max="{{ promise_max }}">
-      <button id="promise">Commit to this date</button>
-      <div id="promise-status"></div>
+  <!-- Door 2: Promise a Date -->
+  <div class="action-card" id="door-promise">
+    <h3>
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--warning, #f59e0b);"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+      Promise a Date
+    </h3>
+    <p>Need more time? Commit to a specific date for payment.</p>
+    <div class="action-form">
+      <div class="form-group">
+        <label for="promised-date">When will you pay?</label>
+        <input type="date" id="promised-date" min="{{ promise_min }}" max="{{ promise_max }}">
+      </div>
+      <button id="promise" class="btn-secondary">Submit Promise</button>
     </div>
-  </details>
+    <div id="promise-status" class="status"></div>
+  </div>
 
-  <details>
-    <summary>Something is wrong with this invoice</summary>
-    <div>
-      <label class="small muted" for="dispute-reason">What is the problem? Up to {{ dispute_reason_max }} characters.</label>
-      <textarea id="dispute-reason" maxlength="{{ dispute_reason_max }}" placeholder="For example: the goods were short delivered, or this was already paid by NEFT on 12 August."></textarea>
-      <button id="dispute">Raise a dispute</button>
-      <div id="dispute-status"></div>
+  <!-- Door 3: Raise a Dispute -->
+  <div class="action-card" id="door-dispute">
+    <h3>
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--danger, #ef4444);"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      Raise a Dispute
+    </h3>
+    <p>Is there an issue with this invoice? Let us know so we can resolve it.</p>
+    <div class="action-form">
+      <div class="form-group">
+        <label for="dispute-reason">Reason for dispute</label>
+        <textarea id="dispute-reason" rows="3" maxlength="{{ dispute_reason_max }}" placeholder="E.g., Goods not received, incorrect amount..."></textarea>
+      </div>
+      <button id="dispute" class="btn-secondary btn-dispute">Submit Dispute</button>
     </div>
-  </details>
-</div>
+    <div id="dispute-status" class="status"></div>
+  </div>
 
-<p class="muted small">
-  Raising a dispute stops all automated follow ups on this invoice immediately and sends it
-  to a person to review.
-</p>
+  <div class="compliance-note">
+    Actioning any of the above options will halt automated follow-up communications.
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -105,6 +334,7 @@
               razorpay_signature: response.razorpay_signature,
             });
             show("pay-status", "Payment received. Thank you, this invoice is now settled.", true);
+            button.textContent = "Paid";
           } catch (err) {
             // Verification failed in the browser, but the webhook is the system of
             // record, so never tell the payer their money is lost.
@@ -121,18 +351,17 @@
 
       checkout.open();
     } catch (err) {
-      button.disabled = false;
       show("pay-status", err.message, false);
+      button.disabled = false;
     }
   });
 
   document.getElementById("promise").addEventListener("click", async () => {
     const field = document.getElementById("promised-date");
     const value = field.value;
-    if (!value) { show("promise-status", "Pick a date first.", false); return; }
+    if (!value) return show("promise-status", "Pick a date first.", false);
     if (value < field.min || value > field.max) {
-      show("promise-status", "Pick a date between " + field.min + " and " + field.max + ".", false);
-      return;
+      return show("promise-status", "Pick a date between " + field.min + " and " + field.max + ".", false);
     }
     try {
       await postJSON("/api/promise", { token: TOKEN, promised_date: value });
@@ -144,13 +373,14 @@
 
   document.getElementById("dispute").addEventListener("click", async () => {
     const reason = document.getElementById("dispute-reason").value.trim();
-    if (!reason) { show("dispute-status", "Tell us briefly what is wrong.", false); return; }
+    if (!reason) return show("dispute-status", "Describe the problem first.", false);
     try {
-      const res = await postJSON("/api/dispute", { token: TOKEN, reason });
+      const res = await postJSON("/api/dispute", { token: TOKEN, reason: reason });
       const statNote = res.statutory_clock_suspended
-        ? " • MSMED Statutory interest clock paused pending resolution."
+        ? " • MSMED statutory interest clock paused pending resolution."
         : " • Objection logged past the 15-day deemed acceptance window.";
-      const msg = "Objection Raised [" + res.category + "]" + statNote + "\nRequired Documentation: " + res.evidence_required;
+      const msg = "Objection raised [" + res.category + "]" + statNote
+        + "\nRequired documentation: " + res.evidence_required;
       show("dispute-status", msg, true);
     } catch (err) {
       show("dispute-status", err.message, false);
