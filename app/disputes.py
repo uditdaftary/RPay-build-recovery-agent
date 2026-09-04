@@ -111,7 +111,9 @@ _CATEGORY_PATTERNS: tuple[tuple[DisputeCategory, re.Pattern[str]], ...] = (
             r"\btax (rate|amount|percent|percentage|mismatch|deduct|credit|component|"
             r"calculation|invoice|slab|head)",
             r"(wrong|incorrect|excess|short|extra|higher|lower) tax\b",
-            r"input (tax )?credit", r"\bitc\b", r"\b2b\b", r"\b26as\b",
+            # No bare `\b2b\b`: unlike "26as" or "itc", "2b" is common outside tax context
+            # (clause/section numbering) and `\bgstr` already covers a genuine "GSTR-2B".
+            r"input (tax )?credit", r"\bitc\b", r"\b26as\b",
             r"reverse charge", r"\brcm\b", r"withholding",
         ),
     ),
@@ -136,7 +138,14 @@ _CATEGORY_PATTERNS: tuple[tuple[DisputeCategory, re.Pattern[str]], ...] = (
     (
         DisputeCategory.INVOICE_MISMATCH,
         _roots(
-            r"\brate\b", r"\brates\b", r"\bprice", r"\bpricing", r"unit (rate|price|cost)",
+            # Claim-shaped, not a bare root - the same reasoning as the TAX_GST note above.
+            # Bare `\brate\b`/`\bprice` matched any passing mention ("the courier's error
+            # rate has been terrible", "interest rate charged for the delay is unfair, and
+            # payment is not due yet") and, sitting above CONTRACTUAL/GOODS_SERVICES,
+            # outranked the actual complaint.
+            r"(wrong|incorrect|inflated|excess|different|higher|lower) (rate|price|pricing)\b",
+            r"(rate|price|pricing) (is wrong|is incorrect|does not match|doesn'?t match|mismatch)",
+            r"unit (rate|price|cost)",
             r"purchase order", r"\bpo (rate|price|value|amount|number|copy|terms)", r"\bp\.o\.",
             r"overcharg", r"over[- ]?charg", r"over[- ]?bill", r"overbill",
             r"excess (amount|billing|charge|charged)",

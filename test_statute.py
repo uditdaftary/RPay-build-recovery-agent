@@ -460,7 +460,9 @@ class TestStatuteAndDisputes(unittest.TestCase):
 
         `\btax` sat third in the table and matched any sentence containing "tax", so an
         explicit short-delivery complaint was classified TAX_GST and the debtor was asked
-        for a GSTR-2B mismatch certificate instead of an inspection report.
+        for a GSTR-2B mismatch certificate instead of an inspection report. `\brate\b`/
+        `\bprice` and `\b2b\b` were the same bug in INVOICE_MISMATCH and TAX_GST: a bare
+        "error rate" or a contract's "clause 2b" outranked the actual complaint below it.
         """
         self.assertEqual(
             classify_dispute_reason(
@@ -471,6 +473,19 @@ class TestStatuteAndDisputes(unittest.TestCase):
         # Still a tax dispute when the reason actually makes one.
         for reason in ("The tax rate applied is wrong", "Excess tax charged on this bill"):
             self.assertEqual(classify_dispute_reason(reason), DisputeCategory.TAX_GST, reason)
+        self.assertEqual(
+            classify_dispute_reason(
+                "The delay is not our fault, the courier's error rate has been terrible."
+            ),
+            DisputeCategory.UNKNOWN,
+        )
+        self.assertEqual(
+            classify_dispute_reason("As per clause 2b of our agreement, payment is not due yet."),
+            DisputeCategory.CONTRACTUAL,
+        )
+        # Still an invoice-mismatch dispute when the reason actually makes one.
+        for reason in ("Billed at the wrong rate and short delivered by 5 units", "Billed at a higher price than our PO value"):
+            self.assertEqual(classify_dispute_reason(reason), DisputeCategory.INVOICE_MISMATCH, reason)
 
     def test_dispute_recompute_statutory_dates(self) -> None:
         """Test recomputing statutory dates on dispute objection inside 15 days vs outside."""
