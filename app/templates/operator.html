@@ -86,8 +86,9 @@
   <h2 style="margin: 0 0 4px 0; font-size: 16px; color: var(--text);">Review-first mode: pending human approvals ({{ queue_total }})</h2>
   {% if queue_total > queue | length %}
   <p style="margin: 0 0 16px 0; color: var(--muted); font-size: 12px;">
-    Showing the {{ queue | length }} oldest. Each row carries a full drafted message, so the
-    whole queue is served by <a href="/api/operator/queue{% if operator_key %}?key={{ operator_key }}{% endif %}">/api/operator/queue</a> rather than rendered here.
+    Showing each debtor's oldest pending action ({{ queue | length }} of {{ queue_total }} items).
+    Approving or rejecting takes the next item for that debtor, so every debtor is actionable from
+    this list; the full queue is served by <a href="/api/operator/queue{% if operator_key %}?key={{ operator_key }}{% endif %}">/api/operator/queue</a>.
   </p>
   {% endif %}
   {% if queue %}

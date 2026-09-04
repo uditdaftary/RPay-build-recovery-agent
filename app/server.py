@@ -198,6 +198,25 @@ def rejected_input(request: Request, exc: RequestValidationError) -> JSONRespons
     # Logged, not recorded. These endpoints are public and unauthenticated, and the audit
     # log is now an input to the envelope that `contact_history` re-parses in full on every
     # decision - so an audit row per rejected request is an anonymous way to grow the file
+# How many `decision.made` rows the console's decision log renders.
+OPERATOR_DECISION_LOG_SIZE = 25
+
+
+def _console_queue_window(queue: list[dict]) -> list[dict]:
+    """The queue rows the console renders: the oldest pending action per debtor.
+
+    A flat `queue[:N]` assumed the queue was one FIFO. Without a database it is not -
+    `get_review_queue` flattens a dict keyed by debtor, so the first N rows were the
+    first few debtors' entire backlogs and every debtor after them lost their Approve
+    and Reject buttons. One row per debtor is also exactly what the actions need, since
+    `approve_review_item` and `reject_review_item` take a debtor id and act on that
+    debtor's oldest item - the row rendered here.
+    """
+    oldest_per_debtor: dict[str, dict] = {}
+    for item in queue:
+        oldest_per_debtor.setdefault(item.get("debtor_id"), item)
+    return list(oldest_per_debtor.values())[:OPERATOR_QUEUE_PAGE_SIZE]
+
     # the decision engine reads. Same reasoning `read_all` and `contact_history` already
     # apply to malformed rows: a defect in the caller belongs where defects go, not in the
     # evaluation artifact. Every field is named, because repeated probing is the pattern
@@ -828,10 +847,7 @@ def operator_dashboard(request: Request) -> HTMLResponse:
         "operator.html",
         {
             "kill_switch_active": is_kill_switch_active(),
-            # FIFO order is the queue's own contract, so the bound keeps the oldest.
-            # Unbounded this rendered 193 rows and 600KB of drafted message bodies into
-            # one server-rendered page; the count above it stays honest about the rest.
-            "queue": queue[:OPERATOR_QUEUE_PAGE_SIZE],
+            "queue": _console_queue_window(queue),
             "queue_total": len(queue),
             "operator_key": key,
             # The decision log the console renders is the audit log itself, newest first.
