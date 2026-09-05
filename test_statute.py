@@ -379,6 +379,15 @@ class TestStatuteAndDisputes(unittest.TestCase):
             ("Payment is not due yet, we are on net 45 terms", DisputeCategory.CONTRACTUAL),
             ("Retention money is held back until the warranty period ends", DisputeCategory.CONTRACTUAL),
             ("Work is not complete, final phase is pending sign-off", DisputeCategory.CONTRACTUAL),
+            # Noun-before-adjective / reversed word orders a debtor types naturally, which the
+            # adjective-first roots missed and returned UNKNOWN for.
+            ("We got fewer boxes than ordered", DisputeCategory.GOODS_SERVICES),
+            ("Half the order is missing", DisputeCategory.GOODS_SERVICES),
+            ("Delivery was partial", DisputeCategory.GOODS_SERVICES),
+            ("We received 32 units against 40 billed", DisputeCategory.GOODS_SERVICES),
+            ("Sign-off is still pending from our side", DisputeCategory.CONTRACTUAL),
+            ("The pricing looks inflated", DisputeCategory.INVOICE_MISMATCH),
+            ("This charge is not correct", DisputeCategory.INVOICE_MISMATCH),
             # Genuinely uninformative reasons must stay UNKNOWN so over-widening fails loudly.
             ("please check this", DisputeCategory.UNKNOWN),
             ("We have a problem with this bill", DisputeCategory.UNKNOWN),

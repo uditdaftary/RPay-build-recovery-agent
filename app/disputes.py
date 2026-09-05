@@ -145,6 +145,12 @@ _CATEGORY_PATTERNS: tuple[tuple[DisputeCategory, re.Pattern[str]], ...] = (
             # outranked the actual complaint.
             r"(wrong|incorrect|inflated|excess|different|higher|lower) (rate|price|pricing)\b",
             r"(rate|price|pricing) (is wrong|is incorrect|does not match|doesn'?t match|mismatch)",
+            # Noun-before-adjective phrasings the roots above miss because they read
+            # adjective-first: "the pricing looks inflated", "this charge is not correct".
+            # `invoice`/`bill` are deliberately excluded from the subject list so "the tax on
+            # the invoice is wrong" is not pulled out of TAX_GST/GOODS_SERVICES.
+            r"(rate|price|pricing|amount|charge|billing|figure|total) (looks?|is|are|seems?|appears?) "
+            r"(inflated|wrong|incorrect|not correct|excessive|too high|overstated|overcharged)",
             r"unit (rate|price|cost)",
             r"purchase order", r"\bpo (rate|price|value|amount|number|copy|terms)", r"\bp\.o\.",
             r"overcharg", r"over[- ]?charg", r"over[- ]?bill", r"overbill",
@@ -172,7 +178,7 @@ _CATEGORY_PATTERNS: tuple[tuple[DisputeCategory, re.Pattern[str]], ...] = (
             r"warranty period", r"defect liability", r"completion certificate",
             r"(work|project|job|service delivery|scope) (is )?(not|incomplete|pending|unfinished)",
             r"not (signed off|signed-off|accepted|approved|completed|commissioned)",
-            r"sign[- ]?off (pending|awaited|not done)",
+            r"sign[- ]?off\b.{0,15}(pending|awaited|not done|incomplete)",
             r"pending (sign[- ]?off|approval|acceptance|inspection)",
             r"out of scope", r"scope of work", r"advance (not )?adjust", r"security deposit",
             r"stage payment", r"as per (the )?(contract|agreement|terms|mou|loi|understanding)",
@@ -183,9 +189,15 @@ _CATEGORY_PATTERNS: tuple[tuple[DisputeCategory, re.Pattern[str]], ...] = (
         _roots(
             r"\bshort[-\s]?(deliver|ship|shipp|suppl|receiv|land|dispatch|qty|quantit|fall|age)",
             r"\bshortfall", r"\bshortage", r"under[- ]?(deliver|suppl|shipp)",
-            r"less (quantity|units|material|stock)", r"fewer (unit|item|piece|quantit)",
+            r"less (quantity|units|material|stock)",
+            r"fewer (unit|item|piece|quantit|box|carton|bag|pallet|crate)",
             r"missing (unit|item|piece|quantit|goods|stock|material|part|box|carton)",
             r"units (short|missing|less|received|not received)",
+            # Noun-before-state phrasings: "half the order is missing", "delivery was
+            # partial", and a bare count shortfall "32 units against 40".
+            r"(order|delivery|consignment|shipment|goods|stock|material|part|portion|balance|"
+            r"box(?:es)?|carton|item|unit|quantit)\w* (is|are|was|were) (missing|short|incomplete|partial)",
+            r"\d+\s*(unit|item|piece|pc|no|carton|box|bag|crate|qty)\w*\s+against\s+\d+",
             r"not (yet )?(received|delivered)",
             r"never (received|delivered|arrived|got|reached|came)",
             r"nothing (was )?(received|delivered|arrived)",
