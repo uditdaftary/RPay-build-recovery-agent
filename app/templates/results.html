@@ -10,19 +10,41 @@
     gap: 16px;
     margin-bottom: 24px;
   }
+  /* Double-Bezel (Doppelrand) Concentric KPI Cards */
   .stat-card {
-    background: var(--surface);
+    background: var(--surface-raised);
     border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    padding: 18px 22px;
+    border-radius: 18px;
+    padding: 4px;
     position: relative;
     box-shadow: var(--shadow-sm);
-    transition: box-shadow 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
+    transition: box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1), transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    display: flex;
+    flex-direction: column;
   }
   .stat-card:hover {
     box-shadow: var(--shadow-md);
     transform: translateY(-2px);
     border-color: var(--muted);
+  }
+  .stat-card-inner {
+    background: var(--surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: 14px;
+    padding: 16px 18px;
+    height: 100%;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.08);
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+  }
+  [data-theme="light"] .stat-card-inner {
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.9), 0 1px 2px rgba(0, 0, 0, 0.02);
+  }
+  .stat-card:hover .stat-card-inner {
+    border-color: var(--border);
   }
   .stat-card-title {
     font-size: 11px;
@@ -57,6 +79,20 @@
     margin-bottom: 12px;
     font-size: 13px;
   }
+  @media (max-width: 600px) {
+    .strat-bar-wrap {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 6px;
+    }
+    .strat-name {
+      width: 100%;
+      margin-bottom: 2px;
+    }
+    .bar-row {
+      gap: 8px;
+    }
+  }
   .strat-name {
     width: 170px;
     font-weight: 600;
@@ -88,24 +124,40 @@
     border-radius: var(--radius-full);
     overflow: hidden;
     position: relative;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.08);
+    border: 1px solid rgba(0, 0, 0, 0.04);
+  }
+  [data-theme="dark"] .bar-track {
+    border-color: rgba(255, 255, 255, 0.04);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3);
   }
   .bar-fill-agent {
     background: linear-gradient(90deg, var(--accent) 0%, var(--accent-hover) 100%);
     height: 100%;
+    width: 100%;
     border-radius: var(--radius-full);
-    transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    transform-origin: left center;
+    transition: transform 0.65s cubic-bezier(0.16, 1, 0.3, 1);
   }
   .bar-fill-baseline {
-    background: linear-gradient(90deg, var(--danger) 0%, #b91c1c 100%);
+    background: linear-gradient(90deg, var(--danger) 0%, var(--danger-hover) 100%);
     height: 100%;
+    width: 100%;
     border-radius: var(--radius-full);
-    transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    transform-origin: left center;
+    transition: transform 0.65s cubic-bezier(0.16, 1, 0.3, 1);
   }
   .bar-val {
     width: 65px;
     font-weight: 700;
     color: var(--text);
     font-variant-numeric: tabular-nums;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .bar-fill-agent,
+    .bar-fill-baseline {
+      transition-duration: 0.001ms !important;
+    }
   }
 
   .matrix-table {
@@ -137,10 +189,6 @@
   .matrix-row-main:hover {
     background-color: var(--border-subtle);
   }
-  .matrix-row-main:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: -2px;
-  }
   .matrix-row-details {
     background: var(--bg);
     display: none;
@@ -158,23 +206,35 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     margin: 8px 0;
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.05);
   }
   @media (max-width: 768px) {
     .details-box { grid-template-columns: 1fr; }
+  }
+
+  /* Semantic heading inside details box */
+  .details-heading {
+    font-size: 11.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 0 0 6px 0;
+    line-height: 1.3;
+    color: var(--text);
   }
 
   /* Theme-aware callouts for details box */
   .callout-erred {
     padding: 12px 16px;
     background: var(--danger-light);
-    border: 1px solid rgba(239, 68, 68, 0.3);
+    border: 1px solid var(--danger-border);
     border-radius: var(--radius);
   }
+  .callout-erred .details-heading,
   .callout-erred strong {
     color: var(--danger);
-    font-size: 12px;
-    text-transform: uppercase;
     letter-spacing: 0.04em;
+    margin: 0 0 4px 0;
   }
   .callout-erred p {
     margin: 4px 0 0 0;
@@ -186,15 +246,15 @@
   .callout-won {
     padding: 12px 16px;
     background: var(--success-light);
-    border: 1px solid rgba(34, 197, 94, 0.3);
+    border: 1px solid var(--success-border);
     border-radius: var(--radius);
     margin-bottom: 12px;
   }
+  .callout-won .details-heading,
   .callout-won strong {
     color: var(--success);
-    font-size: 12px;
-    text-transform: uppercase;
     letter-spacing: 0.04em;
+    margin: 0 0 4px 0;
   }
   .callout-won p {
     margin: 4px 0 0 0;
@@ -204,16 +264,68 @@
   }
 
   .draft-box {
-    padding: 12px 16px;
+    padding: 14px 16px;
     background: var(--accent-light);
-    border: 1px solid rgba(99, 102, 241, 0.25);
+    border: 1px solid var(--border);
     border-radius: var(--radius);
+  }
+
+  .btn-details-toggle:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* Button-in-Button CTA Architecture */
+  .btn-in-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border-radius: var(--radius-full);
+    padding: 6px 6px 6px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+    transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.2s ease, border-color 0.2s ease;
+    cursor: pointer;
+  }
+  .btn-in-btn:hover {
+    transform: translateY(-1px);
+  }
+  .btn-in-btn:active {
+    transform: translateY(0);
+  }
+  .btn-bubble {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.18);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.2s ease;
+    flex-shrink: 0;
+  }
+  .btn-in-btn:hover .btn-bubble {
+    transform: scale(1.1);
+    background: rgba(255, 255, 255, 0.28);
+  }
+  [data-theme="light"] .btn-primary .btn-bubble {
+    background: rgba(255, 255, 255, 0.22);
+  }
+  [data-theme="light"] .btn-primary:hover .btn-bubble {
+    background: rgba(255, 255, 255, 0.35);
+  }
+  [data-theme="light"] .btn-secondary .btn-bubble {
+    background: rgba(0, 0, 0, 0.07);
+  }
+  [data-theme="light"] .btn-secondary:hover .btn-bubble {
+    background: rgba(0, 0, 0, 0.12);
   }
 
   /* Native Accessible Modal Dialog (modern-web-guidance) */
   dialog.modal-dialog {
     border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
+    border-radius: 18px;
     background: var(--surface);
     color: var(--text);
     max-width: 680px;
@@ -222,17 +334,18 @@
     padding: 0;
     margin: auto;
     overflow: hidden;
-    box-shadow: var(--shadow-lg);
+    box-shadow: 0 24px 64px -12px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.08);
   }
   dialog.modal-dialog::backdrop {
-    background: rgba(15, 23, 42, 0.65);
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
+    background: var(--modal-backdrop);
+    backdrop-filter: blur(8px) saturate(130%);
+    -webkit-backdrop-filter: blur(8px) saturate(130%);
   }
   .modal-inner {
     display: flex;
     flex-direction: column;
     max-height: 90vh;
+    border-radius: 18px;
   }
   .modal-header {
     display: flex;
@@ -240,6 +353,7 @@
     align-items: center;
     padding: 18px 24px;
     border-bottom: 1px solid var(--border);
+    background: var(--surface);
   }
   .modal-body-scroll {
     padding: 24px;
@@ -249,16 +363,17 @@
   .pre-draft-body {
     white-space: pre-wrap;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: 12px;
-    line-height: 1.55;
-    background: #09090b;
-    color: #f4f4f5;
+    font-size: 12.5px;
+    line-height: 1.6;
+    background: var(--surface-raised);
+    color: var(--text);
     padding: 16px;
     border-radius: var(--radius);
     margin: 0;
     max-height: 320px;
     overflow-y: auto;
     border: 1px solid var(--border);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);
   }
 </style>
 {% endblock %}
@@ -323,83 +438,95 @@
   <div class="card-grid">
     <!-- Card 1: Total Book Value -->
     <div class="stat-card">
-      <div class="stat-card-title">
-        <span>Total Book Value</span>
-        <span class="badge-pill badge-slate">Exposure</span>
-      </div>
-      <div class="stat-card-val">{{ portfolio.total_book_value_inr }}</div>
-      <div class="stat-card-sub">
-        <strong>{{ portfolio.total_invoices }} invoices</strong> across <strong>{{ portfolio.total_debtors }} commercial debtors</strong>
+      <div class="stat-card-inner">
+        <div class="stat-card-title">
+          <span>Total Book Value</span>
+          <span class="badge-pill badge-slate">Exposure</span>
+        </div>
+        <div class="stat-card-val">{{ portfolio.total_book_value_inr }}</div>
+        <div class="stat-card-sub">
+          <strong>{{ portfolio.total_invoices }} invoices</strong> across <strong>{{ portfolio.total_debtors }} commercial debtors</strong>
+        </div>
       </div>
     </div>
 
     <!-- Card 2: Naive vs Collectible Balance -->
     <div class="stat-card">
-      <div class="stat-card-title">
-        <span>True Collectible Balance</span>
-        <span class="badge-pill badge-indigo">Net of Deductions</span>
-      </div>
-      <div class="stat-card-val text-accent">{{ portfolio.total_collectible_inr }}</div>
-      <div class="stat-card-sub">
-        vs {{ portfolio.total_naive_outstanding_inr }} Naive Outstanding (Prevents ₹1.46L wrongful TDS dunning)
+      <div class="stat-card-inner">
+        <div class="stat-card-title">
+          <span>True Collectible Balance</span>
+          <span class="badge-pill badge-indigo">Net of Deductions</span>
+        </div>
+        <div class="stat-card-val text-accent">{{ portfolio.total_collectible_inr }}</div>
+        <div class="stat-card-sub">
+          vs {{ portfolio.total_naive_outstanding_inr }} Naive Outstanding (Prevents ₹1.46L wrongful TDS dunning)
+        </div>
       </div>
     </div>
 
     <!-- Card 3: WAIT Restraint Share -->
     <div class="stat-card">
-      <div class="stat-card-title">
-        <span>WAIT Restraint Share</span>
-        <span class="badge-pill badge-emerald">Noise Reduction</span>
-      </div>
-      <div class="stat-card-val text-success">
-        {{ comparative_metrics.agent_wait_restraint_pct }}%
-        <span style="font-size: 14px; font-weight: 500; color: var(--muted);">vs {{ comparative_metrics.baseline_wait_restraint_pct }}% Base</span>
-      </div>
-      <div class="stat-card-sub">
-        <strong>{{ comparative_metrics.agent_wait_restraint_count }}/{{ comparative_metrics.total_evaluated_debtors }} accounts</strong> held back under reliable payer &amp; opt-out policy
+      <div class="stat-card-inner">
+        <div class="stat-card-title">
+          <span>WAIT Restraint Share</span>
+          <span class="badge-pill badge-emerald">Noise Reduction</span>
+        </div>
+        <div class="stat-card-val text-success">
+          {{ comparative_metrics.agent_wait_restraint_pct }}%
+          <span style="font-size: 14px; font-weight: 500; color: var(--muted);">vs {{ comparative_metrics.baseline_wait_restraint_pct }}% Base</span>
+        </div>
+        <div class="stat-card-sub">
+          <strong>{{ comparative_metrics.agent_wait_restraint_count }}/{{ comparative_metrics.total_evaluated_debtors }} accounts</strong> held back under reliable payer &amp; opt-out policy
+        </div>
       </div>
     </div>
 
     <!-- Card 4: Reconciliation Routing -->
     <div class="stat-card">
-      <div class="stat-card-title">
-        <span>Reconciliation Routing</span>
-        <span class="badge-pill badge-cyan">Tax &amp; Bank UTR</span>
-      </div>
-      <div class="stat-card-val" style="color: #0284c7;">
-        {{ comparative_metrics.reconcile_routing_pct }}%
-      </div>
-      <div class="stat-card-sub">
-        <strong>{{ comparative_metrics.reconcile_routing_count }}/{{ comparative_metrics.total_evaluated_debtors }} accounts</strong> routed to Form 26AS TDS &amp; UTR verification
+      <div class="stat-card-inner">
+        <div class="stat-card-title">
+          <span>Reconciliation Routing</span>
+          <span class="badge-pill badge-cyan">Tax &amp; Bank UTR</span>
+        </div>
+        <div class="stat-card-val" style="color: var(--badge-cyan-text);">
+          {{ comparative_metrics.reconcile_routing_pct }}%
+        </div>
+        <div class="stat-card-sub">
+          <strong>{{ comparative_metrics.reconcile_routing_count }}/{{ comparative_metrics.total_evaluated_debtors }} accounts</strong> routed to Form 26AS TDS &amp; UTR verification
+        </div>
       </div>
     </div>
 
     <!-- Card 5: Prevented Escalations -->
     <div class="stat-card">
-      <div class="stat-card-title">
-        <span>Prevented Escalations</span>
-        <span class="badge-pill badge-rose">Relationship Protection</span>
-      </div>
-      <div class="stat-card-val text-danger">
-        {{ comparative_metrics.prevented_escalations_count }}/{{ comparative_metrics.total_evaluated_debtors }}
-      </div>
-      <div class="stat-card-sub">
-        100% of indiscriminate Day 30+ legal threat notices intercepted &amp; blocked
+      <div class="stat-card-inner">
+        <div class="stat-card-title">
+          <span>Prevented Escalations</span>
+          <span class="badge-pill badge-rose">Relationship Protection</span>
+        </div>
+        <div class="stat-card-val text-danger">
+          {{ comparative_metrics.prevented_escalations_count }}/{{ comparative_metrics.total_evaluated_debtors }}
+        </div>
+        <div class="stat-card-sub">
+          100% of indiscriminate Day 30+ legal threat notices intercepted &amp; blocked
+        </div>
       </div>
     </div>
 
     <!-- Card 6: Touch Efficiency -->
     <div class="stat-card">
-      <div class="stat-card-title">
-        <span>Touch Efficiency</span>
-        <span class="badge-pill badge-amber">Outreach ROI</span>
-      </div>
-      <div class="stat-card-val">
-        {{ comparative_metrics.agent_touches_per_lakh }}
-        <span style="font-size: 13px; font-weight: 500; color: var(--muted);">touches/Lakh</span>
-      </div>
-      <div class="stat-card-sub">
-        Agent {{ comparative_metrics.agent_touches }} touches vs Baseline {{ comparative_metrics.baseline_touches }} touches ({{ comparative_metrics.baseline_touches_per_lakh }}/Lakh)
+      <div class="stat-card-inner">
+        <div class="stat-card-title">
+          <span>Touch Efficiency</span>
+          <span class="badge-pill badge-amber">Outreach ROI</span>
+        </div>
+        <div class="stat-card-val">
+          {{ comparative_metrics.agent_touches_per_lakh }}
+          <span style="font-size: 13px; font-weight: 500; color: var(--muted);">touches/Lakh</span>
+        </div>
+        <div class="stat-card-sub">
+          Agent {{ comparative_metrics.agent_touches }} touches vs Baseline {{ comparative_metrics.baseline_touches }} touches ({{ comparative_metrics.baseline_touches_per_lakh }}/Lakh)
+        </div>
       </div>
     </div>
   </div>
@@ -464,7 +591,7 @@
           <div class="bar-row">
             <span class="bar-label">Agent</span>
             <div class="bar-track" aria-label="Agent {{ strat }}: {{ agent_count }} accounts">
-              <div class="bar-fill-agent" style="width: {{ agent_pct }}%;"></div>
+              <div class="bar-fill-agent" style="transform: scaleX({{ (agent_pct / 100) if total_evaluated > 0 else 0 }});"></div>
             </div>
             <span class="bar-val">{{ agent_count }} <span style="font-weight: normal; color: var(--muted); font-size: 10.5px;">({{ agent_pct }}%)</span></span>
           </div>
@@ -473,7 +600,7 @@
           <div class="bar-row">
             <span class="bar-label">Baseline</span>
             <div class="bar-track" aria-label="Baseline {{ strat }}: {{ baseline_count }} accounts">
-              <div class="bar-fill-baseline" style="width: {{ baseline_pct }}%;"></div>
+              <div class="bar-fill-baseline" style="transform: scaleX({{ (baseline_pct / 100) if total_evaluated > 0 else 0 }});"></div>
             </div>
             <span class="bar-val">{{ baseline_count }} <span style="font-weight: normal; color: var(--muted); font-size: 10.5px;">({{ baseline_pct }}%)</span></span>
           </div>
@@ -513,7 +640,7 @@
       </thead>
       <tbody>
         {% for item in adjudication_matrix %}
-        <!-- Main Row -->
+        <!-- Main Row (Accessible table row with mouse click delegation, dedicated trigger button below) -->
         <tr class="matrix-row-main" data-debtor-id="{{ item.debtor_id }}">
           <td>
             <div style="font-weight: 700; color: var(--text); font-size: 14px;">{{ item.debtor_name }}</div>
@@ -554,7 +681,7 @@
             {% endif %}
           </td>
           <td style="text-align: right;">
-            <button class="btn btn-secondary btn-details-toggle toggle-btn-{{ item.debtor_id }}" data-debtor-id="{{ item.debtor_id }}" aria-expanded="false" aria-controls="details-row-{{ item.debtor_id }}" aria-label="Toggle details for {{ item.debtor_name }}" style="font-size: 12px; padding: 6px 12px; min-height: 44px; min-width: 44px;">
+            <button class="btn btn-secondary btn-details-toggle toggle-btn-{{ item.debtor_id }}" data-debtor-id="{{ item.debtor_id }}" aria-expanded="false" aria-controls="details-row-{{ item.debtor_id }}" aria-label="Toggle details for {{ item.debtor_name }}" style="font-size: 12px; padding: 6px 14px; min-height: 44px; min-width: 44px; border-radius: var(--radius-full);">
               Details
             </button>
           </td>
@@ -567,14 +694,14 @@
               <!-- Left Column: Debtor Profile & Why Baseline Erred -->
               <div>
                 <div style="margin-bottom: 14px;">
-                  <strong style="color: var(--text); font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;">Debtor Context &amp; Profile</strong>
+                  <h4 class="details-heading">Debtor Context &amp; Profile</h4>
                   <p style="margin: 6px 0 0 0; color: var(--text-secondary); font-size: 13px; line-height: 1.5;">
                     {{ item.debtor_profile | default(item.rationale) }}
                   </p>
                 </div>
 
                 <div class="callout-erred">
-                  <strong>Why Baseline Erred</strong>
+                  <h4 class="details-heading">Why Baseline Erred</h4>
                   <p>
                     {{ item.why_baseline_erred | default("Applied rigid calendar-based escalation blind to account state nuances.") }}
                   </p>
@@ -584,7 +711,7 @@
               <!-- Right Column: Why Agent Won & Copy Trigger -->
               <div>
                 <div class="callout-won">
-                  <strong>Why Agent Won</strong>
+                  <h4 class="details-heading">Why Agent Won</h4>
                   <p>
                     {{ item.why_agent_won | default(item.rationale) }}
                   </p>
@@ -599,9 +726,11 @@
                   <div style="font-size: 12px; color: var(--text); font-weight: 600; margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                     Subject: {{ item.drafted_copy_preview.subject | default('(No Subject - WhatsApp Template)', true) }}
                   </div>
-                  <button class="btn btn-primary" style="font-size: 11px; padding: 6px 14px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px;" onclick="openCopyModal({{ loop.index0 }})">
-                    <span>Open Full Draft Preview</span>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="7 7 17 7 17 17"></polyline></svg>
+                  <button class="btn btn-primary btn-in-btn" style="font-size: 11px; min-height: 40px;" onclick="openCopyModal({{ loop.index0 }}, this)" aria-label="Open full draft preview for {{ item.debtor_name }}">
+                    <span class="btn-text">Open Full Draft Preview</span>
+                    <span class="btn-bubble" aria-hidden="true">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="7 7 17 7 17 17"></polyline></svg>
+                    </span>
                   </button>
                 </div>
                 {% else %}
@@ -627,39 +756,47 @@
         <h3 id="modal-debtor-title" style="margin: 0; font-size: 17px; color: var(--text);">Drafted Communication Copy</h3>
         <p id="modal-debtor-sub" style="margin: 3px 0 0 0; font-size: 12px; color: var(--muted);"></p>
       </div>
-      <button class="btn btn-secondary" style="padding: 6px 10px; min-height: 38px; min-width: 38px; display: inline-flex; align-items: center; justify-content: center;" onclick="closeCopyModal()" aria-label="Close dialog">
+      <button class="btn btn-secondary" style="padding: 10px; min-height: 44px; min-width: 44px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%;" onclick="closeCopyModal()" aria-label="Close dialog">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
       </button>
     </div>
 
     <div class="modal-body-scroll">
       <!-- Metadata badges -->
-      <div id="modal-badges" style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px;"></div>
+      <div id="modal-badges" style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px;"></div>
 
       <!-- Subject Box -->
-      <div style="margin-bottom: 14px;">
-        <label style="display: block; font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; margin-bottom: 4px;">Subject Line</label>
-        <div id="modal-subject" style="padding: 10px 14px; background: var(--bg); border: 1.5px solid var(--border); border-radius: var(--radius); font-size: 13px; font-weight: 600; color: var(--text);"></div>
+      <div style="margin-bottom: 16px;">
+        <label style="display: block; font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px;">Subject Line</label>
+        <div id="modal-subject" style="padding: 10px 14px; background: var(--bg); border: 1.5px solid var(--border); border-radius: var(--radius); font-size: 13px; font-weight: 600; color: var(--text); box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.03);"></div>
       </div>
 
       <!-- Body Box -->
-      <div style="margin-bottom: 16px;">
+      <div style="margin-bottom: 18px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-          <label style="font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; margin: 0;">Message Body Copy</label>
-          <button id="btn-copy-clipboard" class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px; min-height: 28px;" onclick="copyModalBodyToClipboard()">Copy Message</button>
+          <label style="font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin: 0;">Message Body Copy</label>
+          <button id="btn-copy-clipboard" class="btn btn-primary btn-in-btn" style="min-height: 44px;" onclick="copyModalBodyToClipboard()" aria-label="Copy outreach message to clipboard">
+            <span class="btn-copy-text">Copy Message</span>
+            <span class="btn-bubble" aria-hidden="true">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            </span>
+          </button>
         </div>
         <pre id="modal-body" class="pre-draft-body"></pre>
       </div>
 
       <!-- Compliance indicator -->
-      <div id="modal-compliance" style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; padding: 12px 16px; border-radius: var(--radius); flex-wrap: gap: 8px;">
-        <span id="modal-compliance-text" style="font-weight: 600; display: inline-flex; align-items: center; gap: 6px;"></span>
-        <button class="btn btn-secondary" style="font-size: 12px; padding: 6px 14px;" onclick="closeCopyModal()">Close</button>
+      <div id="modal-compliance" style="display: flex; justify-content: space-between; align-items: center; font-size: 12.5px; padding: 12px 16px; border-radius: var(--radius); flex-wrap: wrap; gap: 10px;">
+        <span id="modal-compliance-text" style="font-weight: 600; display: inline-flex; align-items: center; gap: 8px;"></span>
+        <button class="btn btn-secondary" style="font-size: 12px; padding: 8px 16px; min-height: 44px; border-radius: var(--radius-full);" onclick="closeCopyModal()">Close</button>
       </div>
     </div>
   </div>
 </dialog>
+{% endblock %}
 
+{% block scripts %}
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.2/anime.min.js"></script>
 <script>
   const matrixData = {{ adjudication_matrix | tojson }};
 
@@ -676,7 +813,8 @@
     const btn = document.querySelector(".toggle-btn-" + debtorId);
     if (!detailsRow) return;
     
-    if (detailsRow.classList.contains("open")) {
+    const isOpen = detailsRow.classList.contains("open");
+    if (isOpen) {
       detailsRow.classList.remove("open");
       if (btn) {
         btn.setAttribute("aria-expanded", "false");
@@ -688,12 +826,25 @@
         btn.setAttribute("aria-expanded", "true");
         btn.innerHTML = 'Close ' + chevronUpSvg;
       }
+      if (typeof anime !== 'undefined' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        const box = detailsRow.querySelector('.details-box');
+        if (box) {
+          anime({
+            targets: box,
+            translateY: [-6, 0],
+            opacity: [0.7, 1],
+            duration: 220,
+            easing: 'easeOutCubic'
+          });
+        }
+      }
     }
   }
 
-  // Row and button listeners with keyboard accessibility
+  // Row and button listeners with keyboard accessibility (Native button trigger handles Enter/Space)
   document.querySelectorAll(".matrix-row-main").forEach(row => {
-    row.addEventListener("click", () => {
+    row.addEventListener("click", (e) => {
+      if (e.target.closest("button, a, input, [role='button']")) return;
       const debtorId = row.getAttribute("data-debtor-id");
       if (debtorId) toggleDetails(debtorId);
     });
@@ -723,65 +874,74 @@
     });
   });
 
+  // Staggered KPI card animation (respects prefers-reduced-motion)
+  function initKPIAnimations() {
+    if (typeof anime !== 'undefined' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      anime({
+        targets: '.stat-card',
+        translateY: [8, 0],
+        opacity: [0, 1],
+        delay: anime.stagger(40),
+        duration: 320,
+        easing: 'easeOutQuad'
+      });
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initKPIAnimations);
+  } else {
+    initKPIAnimations();
+  }
+
   // Native Dialog Controls (modern-web-guidance)
   const copyModal = document.getElementById("copy-modal");
+  let modalTriggerElement = null;
 
-  function openCopyModal(index) {
+  function openCopyModal(index, triggerEl) {
+    modalTriggerElement = triggerEl || document.activeElement;
     const item = matrixData[index];
     if (!item || !item.drafted_copy_preview) return;
     const copy = item.drafted_copy_preview;
 
-    document.getElementById("modal-debtor-title").innerText = item.debtor_name + " (" + item.debtor_id + ")";
-    document.getElementById("modal-debtor-sub").innerText = item.archetype || item.case_name;
+    document.getElementById("modal-debtor-title").innerText = item.debtor_name + " — Outreach Copy";
+    document.getElementById("modal-debtor-sub").innerText = "Strategy: " + item.agent_strategy + " (" + (item.case_name || item.archetype) + ") • Evaluated Decision";
     document.getElementById("modal-subject").innerText = copy.subject || "(No Subject - WhatsApp Template)";
     document.getElementById("modal-body").innerText = copy.body || "";
 
     const badgesContainer = document.getElementById("modal-badges");
     badgesContainer.innerHTML = "";
 
-    // Channel badge
-    const ch = document.createElement("span");
-    ch.className = "badge-pill badge-indigo";
-    ch.innerText = "Channel: " + (copy.channel || "Email").toUpperCase();
-    badgesContainer.appendChild(ch);
+    const chBadge = document.createElement("span");
+    chBadge.className = "badge-pill badge-indigo";
+    chBadge.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:4px;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>' + (copy.channel || "UNKNOWN").toUpperCase();
+    badgesContainer.appendChild(chBadge);
 
-    // Language badge
-    const lang = document.createElement("span");
-    lang.className = "badge-pill badge-blue";
-    lang.innerText = "Language: " + (copy.language || "EN").toUpperCase();
-    badgesContainer.appendChild(lang);
+    const langBadge = document.createElement("span");
+    langBadge.className = "badge-pill badge-slate";
+    langBadge.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:4px;"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>' + (copy.language || "EN").toUpperCase();
+    badgesContainer.appendChild(langBadge);
 
-    // Tone badge
-    if (copy.tone) {
-      const tone = document.createElement("span");
-      tone.className = "badge-pill badge-slate";
-      tone.innerText = "Tone: " + copy.tone.toUpperCase();
-      badgesContainer.appendChild(tone);
-    }
-
-    // Statutory badge
-    const stat = document.createElement("span");
-    if (copy.is_statutory) {
-      stat.className = "badge-pill badge-rose";
-      stat.innerText = "Statutory Notice: MSMED s.15/16 + 43B(h)";
-    } else {
-      stat.className = "badge-pill badge-emerald";
-      stat.innerText = "Commercial Notice: Standard";
-    }
-    badgesContainer.appendChild(stat);
+    const toneBadge = document.createElement("span");
+    toneBadge.className = "badge-pill badge-slate";
+    toneBadge.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:4px;"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>Tone: ' + (copy.tone || "Firm Commercial");
+    badgesContainer.appendChild(toneBadge);
 
     const isClean = copy.dark_pattern_clean !== false;
     const dp = document.createElement("span");
     dp.className = isClean ? "badge-pill badge-emerald" : "badge-pill badge-rose";
-    dp.innerText = isClean
+    const shieldSvg = isClean
+      ? '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:4px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><polyline points="9 12 11 14 15 10"></polyline></svg>'
+      : '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:4px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>';
+    dp.innerHTML = shieldSvg + (isClean
       ? "Anti-Dark-Pattern: Verified Clean"
-      : "Anti-Dark-Pattern: Rewritten by filter";
+      : "Anti-Dark-Pattern: Rewritten by filter");
     badgesContainer.appendChild(dp);
 
     const compliance = document.getElementById("modal-compliance");
     const complianceText = document.getElementById("modal-compliance-text");
     compliance.style.background = isClean ? "var(--success-light)" : "var(--danger-light)";
-    compliance.style.border = isClean ? "1px solid rgba(34, 197, 94, 0.3)" : "1px solid rgba(239, 68, 68, 0.3)";
+    compliance.style.border = isClean ? "1px solid var(--success-border)" : "1px solid var(--danger-border)";
     complianceText.style.color = isClean ? "var(--success)" : "var(--danger)";
     complianceText.innerHTML = isClean
       ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg> <span>Verified anti-dark-pattern compliant &bull; Razorpay link attached</span>'
@@ -792,6 +952,15 @@
     } else {
       copyModal.setAttribute("open", "");
     }
+    if (typeof anime !== 'undefined' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      anime({
+        targets: '#copy-modal .modal-inner',
+        scale: [0.96, 1],
+        opacity: [0, 1],
+        duration: 200,
+        easing: 'easeOutQuad'
+      });
+    }
   }
 
   function closeCopyModal() {
@@ -800,7 +969,16 @@
     } else {
       copyModal.removeAttribute("open");
     }
+    if (modalTriggerElement && typeof modalTriggerElement.focus === "function") {
+      modalTriggerElement.focus();
+    }
   }
+
+  copyModal.addEventListener("close", () => {
+    if (modalTriggerElement && typeof modalTriggerElement.focus === "function") {
+      modalTriggerElement.focus();
+    }
+  });
 
   // modern-web-guidance light dismiss fallback for browsers without closedby support
   if (!('closedBy' in HTMLDialogElement.prototype)) {
@@ -817,45 +995,71 @@
     });
   }
 
+  const copySvg = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
+  const checkSvg = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+
   function copyModalBodyToClipboard() {
     const text = document.getElementById("modal-body").innerText;
     const btn = document.getElementById("btn-copy-clipboard");
-    const orig = btn.innerText;
+    const textSpan = btn.querySelector(".btn-copy-text");
+    const bubbleSpan = btn.querySelector(".btn-bubble");
+
+    function setSuccess() {
+      if (textSpan && bubbleSpan) {
+        textSpan.innerText = "Copied to clipboard!";
+        bubbleSpan.innerHTML = checkSvg;
+        setTimeout(() => {
+          textSpan.innerText = "Copy Message";
+          bubbleSpan.innerHTML = copySvg;
+        }, 1800);
+      } else {
+        const orig = btn.innerText;
+        btn.innerText = "Copied to clipboard!";
+        setTimeout(() => { btn.innerText = orig; }, 1800);
+      }
+    }
 
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text).then(() => {
-        btn.innerText = "Copied to clipboard!";
-        btn.classList.add("btn-primary");
-        setTimeout(() => {
-          btn.innerText = orig;
-          btn.classList.remove("btn-primary");
-        }, 1800);
+        setSuccess();
       }).catch(() => {
-        fallbackCopy(text, btn, orig);
+        fallbackCopy(text, btn);
       });
     } else {
-      fallbackCopy(text, btn, orig);
+      fallbackCopy(text, btn);
     }
   }
 
-  function fallbackCopy(text, btn, orig) {
+  function fallbackCopy(text, btn) {
     const ta = document.createElement("textarea");
     ta.value = text;
     ta.style.position = "fixed";
     ta.style.opacity = "0";
     document.body.appendChild(ta);
     ta.select();
+    const textSpan = btn.querySelector(".btn-copy-text");
+    const bubbleSpan = btn.querySelector(".btn-bubble");
     try {
       document.execCommand("copy");
-      btn.innerText = "Copied to clipboard!";
-      btn.classList.add("btn-primary");
-      setTimeout(() => {
-        btn.innerText = orig;
-        btn.classList.remove("btn-primary");
-      }, 1800);
+      if (textSpan && bubbleSpan) {
+        textSpan.innerText = "Copied to clipboard!";
+        bubbleSpan.innerHTML = checkSvg;
+        setTimeout(() => {
+          textSpan.innerText = "Copy Message";
+          bubbleSpan.innerHTML = copySvg;
+        }, 1800);
+      } else {
+        const orig = btn.innerText;
+        btn.innerText = "Copied to clipboard!";
+        setTimeout(() => { btn.innerText = orig; }, 1800);
+      }
     } catch (e) {
-      btn.innerText = "Copy failed";
-      setTimeout(() => btn.innerText = orig, 1800);
+      if (textSpan) textSpan.innerText = "Copy failed";
+      else btn.innerText = "Copy failed";
+      setTimeout(() => {
+        if (textSpan) textSpan.innerText = "Copy Message";
+        else btn.innerText = "Copy Message";
+      }, 1800);
     } finally {
       document.body.removeChild(ta);
     }

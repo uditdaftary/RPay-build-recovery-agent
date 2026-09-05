@@ -7,6 +7,23 @@
 
 {% block head %}
 <style>
+  :root {
+    --focus-ring: #2563eb;
+    --op-bezel-border: rgba(0, 0, 0, 0.08);
+    --op-inner-bevel: rgba(255, 255, 255, 0.9);
+  }
+  [data-theme="dark"] {
+    --focus-ring: #60a5fa;
+    --op-bezel-border: rgba(255, 255, 255, 0.08);
+    --op-inner-bevel: rgba(255, 255, 255, 0.04);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+
+  /* Header Architecture */
   .op-header {
     display: flex;
     justify-content: space-between;
@@ -14,100 +31,316 @@
     flex-wrap: wrap;
     gap: 16px;
     margin-bottom: 28px;
+    position: relative;
+  }
+  .op-title-area {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
   }
   .op-title {
-    font-size: 24px;
+    font-size: 26px;
     font-weight: 800;
     color: var(--text);
-    margin: 0 0 4px 0;
-    letter-spacing: -0.025em;
+    margin: 0;
+    letter-spacing: -0.03em;
+    line-height: 1.2;
   }
   .op-sub {
     margin: 0;
     color: var(--muted);
     font-size: 13.5px;
+    max-width: 65ch;
+  }
+  .op-header-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
   }
 
-  /* Kill switch visual styling */
-  .kill-switch-card {
-    margin-bottom: 24px;
-    padding: 24px;
-    border-radius: var(--radius-lg);
-    border: 1.5px solid var(--border);
+  /* Button-in-Button Export Pill */
+  .btn-pill-export {
+    border-radius: var(--radius-full);
+    min-height: 44px;
+    padding: 6px 14px 6px 10px;
+    font-size: 12.5px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    border: 1px solid var(--border);
     background: var(--surface);
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    color: var(--text-secondary);
+    text-decoration: none;
+    box-shadow: var(--shadow-sm);
   }
-  .kill-switch-card.halted {
-    border-color: rgba(239, 68, 68, 0.5);
-    background: rgba(239, 68, 68, 0.04);
-    box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.2), 0 4px 14px rgba(239, 68, 68, 0.08);
+  .btn-pill-export:hover {
+    background: var(--border-subtle);
+    color: var(--text);
+    border-color: var(--muted);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow);
   }
-  .kill-switch-card.running {
-    border-color: rgba(34, 197, 94, 0.4);
-    background: rgba(34, 197, 94, 0.03);
-    box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.15), var(--shadow-sm);
+  .export-icon-badge {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--border-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text);
+    transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    flex-shrink: 0;
   }
+  .btn-pill-export:hover .export-icon-badge {
+    transform: translateY(1px);
+    background: var(--accent-light);
+    color: var(--accent);
+  }
+
+  /* Double-Bezel (Doppelrand) Hardware Master Kill Switch */
+  .kill-switch-card.kill-switch-bezel-outer {
+    margin-bottom: 28px;
+    padding: 6px;
+    border-radius: 24px;
+    border: 1.5px solid var(--border);
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-sm);
+    transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    position: relative;
+    overflow: hidden;
+  }
+  .kill-switch-card.kill-switch-bezel-outer.running {
+    border-color: var(--success-border);
+    background: linear-gradient(145deg, rgba(34, 197, 94, 0.09) 0%, rgba(34, 197, 94, 0.02) 100%), var(--surface-raised);
+    box-shadow: 0 0 0 1px var(--success-border), 0 12px 28px -8px rgba(34, 197, 94, 0.2);
+  }
+  .kill-switch-card.kill-switch-bezel-outer.halted {
+    border-color: var(--danger-border);
+    background: linear-gradient(145deg, rgba(239, 68, 68, 0.14) 0%, rgba(239, 68, 68, 0.03) 100%), var(--surface-raised);
+    box-shadow: 0 0 0 1.5px var(--danger-border), 0 16px 36px -6px rgba(239, 68, 68, 0.3);
+  }
+
+  .kill-switch-bezel-inner {
+    background: var(--surface);
+    border-radius: 18px;
+    padding: 22px 24px;
+    border: 1px solid var(--op-bezel-border);
+    box-shadow: inset 0 1px 2px var(--op-inner-bevel), 0 2px 8px rgba(0, 0, 0, 0.03);
+  }
+  [data-theme="dark"] .kill-switch-bezel-inner {
+    box-shadow: inset 0 1px 1px var(--op-inner-bevel), inset 0 -1px 1px rgba(0, 0, 0, 0.35);
+  }
+
   .kill-switch-layout {
     display: flex;
     justify-content: space-between;
     align-items: center;
     flex-wrap: wrap;
-    gap: 16px;
+    gap: 20px;
   }
+  .kill-switch-info {
+    flex: 1 1 500px;
+  }
+
+  .kill-switch-badge-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+  }
+  .kill-hardware-badge {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    background: var(--border-subtle);
+    padding: 3px 8px;
+    border-radius: var(--radius-xs);
+    border: 1px solid var(--border);
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .kill-switch-title {
+    font-size: 18px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: var(--text);
+    margin: 0 0 6px 0;
+  }
+  .kill-switch-desc {
+    margin: 0;
+    font-size: 13.5px;
+    color: var(--text-secondary);
+    line-height: 1.55;
+    max-width: 70ch;
+  }
+
+  /* Radar Pulse Dot & Indicator */
   .kill-indicator {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     font-weight: 700;
-    font-size: 13px;
+    font-size: 12.5px;
+    letter-spacing: 0.01em;
   }
+  .radar-dot-wrap {
+    position: relative;
+    width: 12px;
+    height: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .radar-ring {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    pointer-events: none;
+  }
+  .kill-switch-card.running .radar-ring {
+    border: 2px solid var(--success);
+    animation: radar-ping 2.2s cubic-bezier(0, 0, 0.2, 1) infinite;
+  }
+  .kill-switch-card.halted .radar-ring {
+    border: 2px solid var(--danger);
+    animation: radar-ping 1.3s cubic-bezier(0, 0, 0.2, 1) infinite;
+  }
+  @keyframes radar-ping {
+    0% { transform: scale(0.9); opacity: 0.9; }
+    75%, 100% { transform: scale(2.8); opacity: 0; }
+  }
+
   .pulse-dot {
     width: 8px;
     height: 8px;
     border-radius: 50%;
     display: inline-block;
+    position: relative;
+    z-index: 1;
   }
   .pulse-dot.danger {
     background: var(--danger);
-    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.3);
-    animation: pulse 1.5s infinite;
+    box-shadow: 0 0 6px var(--danger);
   }
   .pulse-dot.success {
     background: var(--success);
-    box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.3);
-  }
-  @keyframes pulse {
-    0% { transform: scale(0.95); opacity: 0.8; }
-    50% { transform: scale(1.2); opacity: 1; }
-    100% { transform: scale(0.95); opacity: 0.8; }
+    box-shadow: 0 0 6px var(--success);
   }
 
-  /* Table styling */
+  /* Tactile Actuator Toggle Button (Button-in-Button) */
+  .btn-actuator {
+    border-radius: var(--radius-full);
+    min-height: 48px;
+    padding: 8px 14px 8px 22px;
+    font-weight: 700;
+    font-size: 13.5px;
+    letter-spacing: -0.01em;
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    cursor: pointer;
+    box-shadow: var(--shadow-sm);
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    user-select: none;
+    position: relative;
+  }
+  .btn-actuator:hover {
+    transform: translateY(-1.5px);
+    box-shadow: var(--shadow-md);
+  }
+  .btn-actuator:active {
+    transform: translateY(1px) scale(0.98);
+  }
+  .btn-actuator .btn-badge-icon {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.2);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    flex-shrink: 0;
+  }
+  .btn-actuator:hover .btn-badge-icon {
+    transform: scale(1.12);
+  }
+  .btn-actuator.is-running {
+    background: var(--danger);
+    border-color: var(--danger-hover);
+    color: #ffffff;
+  }
+  .btn-actuator.is-running:hover {
+    background: var(--danger-hover);
+    box-shadow: 0 8px 24px -4px rgba(239, 68, 68, 0.45);
+  }
+  .btn-actuator.is-halted {
+    background: var(--surface);
+    border-color: var(--border);
+    color: var(--text);
+  }
+  .btn-actuator.is-halted:hover {
+    background: var(--border-subtle);
+    border-color: var(--muted);
+  }
+  .btn-actuator.is-halted .btn-badge-icon {
+    background: var(--success-light);
+    color: var(--success);
+  }
+
+  /* Review Queue Table Architecture */
+  .review-queue-card {
+    position: relative;
+  }
+  .queue-header-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 6px;
+  }
   .queue-table-wrap {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
-    border-radius: var(--radius);
-    margin-top: 14px;
+    border-radius: 14px;
+    border: 1.5px solid var(--border);
+    background: var(--surface);
+    margin-top: 16px;
+    box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.04);
   }
   .queue-table {
     width: 100%;
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
     font-size: 13px;
     text-align: left;
   }
   .queue-table th {
-    padding: 12px 14px;
-    background: var(--bg);
+    padding: 13px 16px;
+    background: var(--surface-raised);
     border-bottom: 1.5px solid var(--border);
     color: var(--muted);
     font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
   }
   .queue-table td {
-    padding: 14px;
-    border-bottom: 1px solid var(--border);
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border-subtle);
     vertical-align: middle;
   }
   .item-row {
@@ -116,50 +349,175 @@
   .item-row:hover {
     background-color: var(--border-subtle);
   }
+  .details-row {
+    background: var(--surface-raised);
+    transition: background-color 0.15s ease;
+  }
+  .details-row td {
+    border-bottom: 1px solid var(--border);
+  }
 
-  /* Timeline in audit log */
+  /* Button-in-Button Action Controls */
+  .btn-pill-action {
+    border-radius: var(--radius-full);
+    min-height: 44px;
+    min-width: 44px;
+    padding: 6px 10px 6px 16px;
+    font-size: 12.5px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    cursor: pointer;
+    box-shadow: var(--shadow-sm);
+  }
+  .btn-pill-action:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow);
+  }
+  .btn-pill-action:active {
+    transform: translateY(1px) scale(0.98);
+  }
+  .btn-action-badge {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.22);
+    transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    flex-shrink: 0;
+  }
+  .btn-pill-action:hover .btn-action-badge {
+    transform: scale(1.15);
+  }
+  .btn-secondary.btn-pill-action .btn-action-badge {
+    background: var(--border-subtle);
+    color: var(--muted);
+  }
+  .btn-secondary.btn-pill-action:hover .btn-action-badge {
+    background: var(--danger-light);
+    color: var(--danger);
+  }
+  .btn-pill-action.btn-approve {
+    background: var(--accent);
+    color: var(--accent-text);
+    border-color: var(--accent);
+  }
+  .btn-pill-action.btn-approve:hover {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+  }
+
+  /* Expandable Message Details Inside Queue */
+  .details-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-top: 8px;
+    box-shadow: var(--shadow-sm);
+  }
+  .preview-pre {
+    white-space: pre-wrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 11.5px;
+    line-height: 1.6;
+    background: var(--bg);
+    padding: 12px 14px;
+    border-radius: var(--radius);
+    margin: 6px 0 0 0;
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+
+  /* Polished Decision Timeline */
   .decision-timeline {
     display: flex;
     flex-direction: column;
-    gap: 20px;
-    border-left: 2px solid var(--border);
-    margin-left: 10px;
-    padding-left: 24px;
-    margin-top: 16px;
+    gap: 16px;
+    position: relative;
+    margin-left: 14px;
+    padding-left: 28px;
+    margin-top: 20px;
+  }
+  .decision-timeline::before {
+    content: "";
+    position: absolute;
+    top: 8px;
+    bottom: 8px;
+    left: 4px;
+    width: 2px;
+    background: linear-gradient(180deg, var(--border) 0%, var(--border-subtle) 100%);
+    border-radius: var(--radius-full);
   }
   .timeline-node {
     position: relative;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 16px 18px;
+    box-shadow: var(--shadow-sm);
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .timeline-node:hover {
+    box-shadow: var(--shadow);
+    border-color: var(--muted);
+    transform: translateY(-1px);
   }
   .timeline-marker {
     position: absolute;
-    left: -30px;
-    top: 5px;
-    width: 10px;
-    height: 10px;
+    left: -32px;
+    top: 18px;
+    width: 14px;
+    height: 14px;
     border-radius: 50%;
     border: 2px solid var(--surface);
+    box-shadow: 0 0 0 1.5px var(--border);
   }
 
-  /* Rejection Native Dialog */
+  /* Double-Bezel Rejection Dialog */
   .accessible-dialog {
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
+    border: 1.5px solid var(--border);
+    border-radius: 20px;
     background: var(--surface);
     color: var(--text);
-    padding: 24px;
-    max-width: 480px;
-    width: 90%;
+    padding: 0;
+    max-width: 500px;
+    width: calc(100% - 32px);
     margin: auto;
-    box-shadow: var(--shadow-lg);
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45), 0 4px 16px rgba(0, 0, 0, 0.15);
+    overflow: hidden;
   }
   .accessible-dialog::backdrop {
-    background: rgba(15, 23, 42, 0.65);
-    backdrop-filter: blur(4px);
+    background: var(--modal-backdrop);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
   }
-  .accessible-dialog h3 {
-    font-size: 17px;
-    margin: 0 0 8px 0;
-    color: var(--text);
+  .dialog-inner-bezel {
+    padding: 24px 26px;
+    border: 1px solid var(--op-inner-bevel);
+    box-shadow: inset 0 1px 1px var(--op-inner-bevel);
+  }
+  .dialog-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+  .dialog-icon-badge {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    background: var(--danger-light);
+    color: var(--danger);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
   }
 
   /* Toast Notification */
@@ -170,13 +528,13 @@
     z-index: 1000;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 10px;
     pointer-events: none;
   }
   .toast {
     background: var(--surface-raised);
     color: var(--text);
-    border: 1px solid var(--border);
+    border: 1.5px solid var(--border);
     padding: 12px 16px;
     border-radius: var(--radius);
     box-shadow: var(--shadow-lg);
@@ -187,20 +545,53 @@
     justify-content: space-between;
     gap: 12px;
     pointer-events: auto;
-    animation: toast-in 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    max-width: 420px;
+    max-width: 440px;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
   }
   .toast.success {
-    border-color: rgba(34, 197, 94, 0.4);
-    box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.2), var(--shadow-lg);
+    border-color: var(--success-border);
   }
   .toast.error {
-    border-color: rgba(239, 68, 68, 0.4);
-    box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.2), var(--shadow-lg);
+    border-color: var(--danger-border);
   }
-  @keyframes toast-in {
-    from { transform: translateY(12px); opacity: 0; }
-    to { transform: translateY(0); opacity: 1; }
+  .toast.info {
+    border-color: var(--border);
+  }
+
+  /* Responsive Reflow & Motion Safety */
+  @media (max-width: 768px) {
+    .op-header {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .op-header-actions {
+      width: 100%;
+    }
+    .btn-pill-export {
+      flex: 1;
+      justify-content: center;
+    }
+    .kill-switch-layout {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .btn-actuator {
+      width: 100%;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .radar-ring {
+      animation: none !important;
+    }
+    .pulse-dot {
+      animation: none !important;
+    }
+    .btn-actuator, .btn-pill-action, .btn-pill-export, .timeline-node {
+      transition: none !important;
+      transform: none !important;
+    }
   }
 </style>
 {% endblock %}
@@ -209,68 +600,98 @@
 <meta name="operator-key" content="{{ operator_key | default('') }}">
 
 <!-- Operator Header -->
-<div class="op-header">
-  <div>
-    <h1 class="op-title">Operator Console</h1>
+<header class="op-header" aria-label="Console Header">
+  <div class="op-title-area">
+    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+      <h1 class="op-title">Operator Console</h1>
+      <span class="badge badge-slate" style="font-size: 11px;">Production Tier</span>
+    </div>
     <p class="op-sub">
       High-Stakes Decision Review Queue &amp; Master Kill Switch Safety Actuator
     </p>
   </div>
-  <div style="display: flex; gap: 8px; align-items: center;">
-    <a href="/api/operator/export?format=json{% if operator_key %}&key={{ operator_key }}{% endif %}" class="btn btn-secondary" download="audit_events.json" aria-label="Export audit events in JSON format">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-      Export JSON
+  <div class="op-header-actions">
+    <a href="/api/operator/export?format=json{% if operator_key %}&key={{ operator_key }}{% endif %}" class="btn-pill-export" download="audit_events.json" aria-label="Export audit events in JSON format">
+      <span class="export-icon-badge" aria-hidden="true">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+      </span>
+      <span>Export JSON</span>
     </a>
-    <a href="/api/operator/export?format=csv{% if operator_key %}&key={{ operator_key }}{% endif %}" class="btn btn-secondary" download="audit_events.csv" aria-label="Export audit events in CSV format">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-      Export CSV
+    <a href="/api/operator/export?format=csv{% if operator_key %}&key={{ operator_key }}{% endif %}" class="btn-pill-export" download="audit_events.csv" aria-label="Export audit events in CSV format">
+      <span class="export-icon-badge" aria-hidden="true">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+      </span>
+      <span>Export CSV</span>
     </a>
   </div>
-</div>
+</header>
 
-<!-- Master Kill Switch Safety Card -->
-<section class="card kill-switch-card {% if kill_switch_active %}halted{% else %}running{% endif %}" aria-labelledby="kill-switch-heading">
-  <div class="kill-switch-layout">
-    <div>
-      <h2 id="kill-switch-heading" style="margin: 0 0 6px 0; font-size: 16px; color: var(--text);">
-        Master Agent Kill Switch
-      </h2>
-      <p style="margin: 0; font-size: 13.5px; color: var(--text-secondary);">
-        {% if kill_switch_active %}
-        <span class="kill-indicator" style="color: var(--danger);">
-          <span class="pulse-dot danger"></span>
-          ENGAGED (Halted)
-        </span>
-        &mdash; All automated and queued outbound agent communications are strictly halted across all instances.
-        {% else %}
-        <span class="kill-indicator" style="color: var(--success);">
-          <span class="pulse-dot success"></span>
-          ACTIVE (Normal Operation)
-        </span>
-        &mdash; Continuous recovery pipeline is operating normally. Click to immediately halt all agent dispatches.
-        {% endif %}
-      </p>
-    </div>
-    <div>
-      <button id="toggle-kill-switch" class="btn {% if kill_switch_active %}btn-secondary{% else %}btn-danger{% endif %}" style="min-height: 44px; padding: 10px 22px; font-weight: 700;">
-        {% if kill_switch_active %}
-          Deactivate Kill Switch (Resume Agents)
-        {% else %}
-          Activate Master Kill Switch (Halt Agents)
-        {% endif %}
-      </button>
+<!-- Master Kill Switch Safety Actuator (Hardware Double-Bezel) -->
+<section id="kill-switch-section" class="card kill-switch-card kill-switch-bezel-outer {% if kill_switch_active %}halted{% else %}running{% endif %}" aria-labelledby="kill-switch-heading">
+  <div class="kill-switch-bezel-inner">
+    <div class="kill-switch-layout">
+      <div class="kill-switch-info">
+        <div class="kill-switch-badge-row">
+          <span class="kill-hardware-badge">SAFETY ACTUATOR // TIER 1 GATE</span>
+          <span id="kill-indicator-badge" class="kill-indicator" style="color: {% if kill_switch_active %}var(--danger){% else %}var(--success){% endif %};">
+            <span class="radar-dot-wrap" aria-hidden="true">
+              <span class="radar-ring"></span>
+              <span class="pulse-dot {% if kill_switch_active %}danger{% else %}success{% endif %}"></span>
+            </span>
+            <span class="kill-indicator-label">{% if kill_switch_active %}ENGAGED (Halted){% else %}ACTIVE (Normal Operation){% endif %}</span>
+          </span>
+        </div>
+        <h2 id="kill-switch-heading" class="kill-switch-title">
+          Master Agent Kill Switch
+        </h2>
+        <p id="kill-switch-desc" class="kill-switch-desc">
+          {% if kill_switch_active %}
+          <span class="kill-indicator" style="color: var(--danger);">
+            <span class="pulse-dot danger"></span>
+            ENGAGED (Halted)
+          </span>
+          &mdash; All automated and queued outbound agent communications are strictly halted across all instances.
+          {% else %}
+          <span class="kill-indicator" style="color: var(--success);">
+            <span class="pulse-dot success"></span>
+            ACTIVE (Normal Operation)
+          </span>
+          &mdash; Continuous recovery pipeline is operating normally. Click to immediately halt all agent dispatches.
+          {% endif %}
+        </p>
+      </div>
+      <div>
+        <button id="toggle-kill-switch" class="btn btn-actuator {% if kill_switch_active %}btn-secondary is-halted{% else %}btn-danger is-running{% endif %}" aria-describedby="kill-switch-desc">
+          <span class="btn-text">
+            {% if kill_switch_active %}
+              Deactivate Kill Switch (Resume Agents)
+            {% else %}
+              Activate Master Kill Switch (Halt Agents)
+            {% endif %}
+          </span>
+          <span class="btn-badge-icon" aria-hidden="true">
+            {% if kill_switch_active %}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+            {% else %}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"></rect></svg>
+            {% endif %}
+          </span>
+        </button>
+      </div>
     </div>
   </div>
 </section>
 
 <!-- Review Queue Section -->
-<section class="card" aria-labelledby="queue-heading">
+<section class="card review-queue-card" aria-labelledby="queue-heading">
   {% set queue_total = queue_total | default(queue | length, true) %}
-  <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 8px; margin-bottom: 4px;">
-    <h2 id="queue-heading" style="margin: 0; font-size: 17px; color: var(--text);">
-      Review-first mode: pending human approvals ({{ queue_total }})
-    </h2>
-    <span class="badge badge-amber" style="font-size: 11px;">High-Stakes Gate</span>
+  <div class="queue-header-bar">
+    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+      <h2 id="queue-heading" style="margin: 0; font-size: 17px; font-weight: 700; color: var(--text);">
+        Review-first mode: pending human approvals ({{ queue_total }})
+      </h2>
+      <span class="badge badge-amber" style="font-size: 11px;">High-Stakes Gate</span>
+    </div>
   </div>
 
   {% if queue_total > queue | length %}
@@ -300,16 +721,16 @@
         {% for item in queue %}
         <tr id="row-{{ item.debtor_id }}-{{ loop.index }}" class="item-row row-{{ item.debtor_id }}">
           <td>
-            <div style="font-weight: 700; color: var(--text);">{{ item.debtor_name }}</div>
-            <div class="font-mono text-muted text-xs">{{ item.debtor_id }}</div>
+            <div style="font-weight: 700; color: var(--text); font-size: 13.5px;">{{ item.debtor_name }}</div>
+            <div class="font-mono text-muted text-xs" style="margin-top: 2px;">{{ item.debtor_id }}</div>
           </td>
           <td>
             <span class="badge badge-amber">{{ item.strategy }}</span>
           </td>
-          <td class="tabular-nums" style="font-weight: 600; color: var(--text);">
+          <td class="tabular-nums" style="font-weight: 700; color: var(--text); font-size: 13.5px;">
             {{ item.ask_amount_display }}
           </td>
-          <td style="color: var(--text-secondary); font-weight: 500;">
+          <td style="color: var(--text-secondary); font-weight: 600; font-size: 12.5px;">
             {{ item.channel | upper }} &middot; {{ item.language | upper }}
           </td>
           <td>
@@ -320,34 +741,46 @@
             {% endif %}
           </td>
           <td style="text-align: right; white-space: nowrap;">
-            <button class="btn-approve btn btn-primary" data-debtor-id="{{ item.debtor_id }}" style="padding: 8px 14px; font-size: 12px; min-height: 44px; min-width: 44px; margin-right: 4px;" aria-label="Approve and send action for {{ item.debtor_id }}">
-              Approve &amp; Send
+            <button class="btn-approve btn btn-primary btn-pill-action" data-debtor-id="{{ item.debtor_id }}" style="margin-right: 6px;" aria-label="Approve and send action for {{ item.debtor_id }}">
+              <span>Approve &amp; Send</span>
+              <span class="btn-action-badge" aria-hidden="true">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              </span>
             </button>
-            <button class="btn-reject btn btn-secondary" data-debtor-id="{{ item.debtor_id }}" style="padding: 8px 14px; font-size: 12px; min-height: 44px; min-width: 44px;" aria-label="Reject action for {{ item.debtor_id }}">
-              Reject
+            <button class="btn-reject btn btn-secondary btn-pill-action" data-debtor-id="{{ item.debtor_id }}" aria-label="Reject action for {{ item.debtor_id }}">
+              <span>Reject</span>
+              <span class="btn-action-badge" aria-hidden="true">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+              </span>
             </button>
           </td>
         </tr>
-        <tr id="details-{{ item.debtor_id }}-{{ loop.index }}" class="details-row details-{{ item.debtor_id }}" style="background: var(--bg);">
-          <td colspan="6" style="padding: 12px 18px;">
+        <tr id="details-{{ item.debtor_id }}-{{ loop.index }}" class="details-row details-{{ item.debtor_id }}">
+          <td colspan="6" style="padding: 14px 20px;">
             <details open style="font-size: 12.5px; border-top: none; margin-top: 0; padding-top: 0;">
-              <summary style="cursor: pointer; font-weight: 600; color: var(--text); margin-bottom: 8px;">
+              <summary style="cursor: pointer; font-weight: 700; color: var(--text); margin-bottom: 8px;">
                 Drafted Message Preview &amp; Strategist Reasoning
               </summary>
-              <div style="background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; margin-top: 6px;">
-                <div style="margin-bottom: 8px;">
+              <div class="details-box">
+                <div style="margin-bottom: 10px;">
                   <strong style="color: var(--text);">Strategist Reasoning:</strong>
-                  <span style="color: var(--text-secondary);">{{ item.reasoning }}</span>
+                  <span style="color: var(--text-secondary); line-height: 1.5; margin-left: 4px;">{{ item.reasoning }}</span>
                 </div>
                 {% if item.subject %}
-                <div style="margin-bottom: 8px;">
+                <div style="margin-bottom: 10px;">
                   <strong style="color: var(--text);">Subject Line:</strong>
-                  <span class="font-mono" style="color: var(--text); font-size: 12px;">{{ item.subject }}</span>
+                  <span class="font-mono" style="color: var(--text); font-size: 12px; margin-left: 4px;">{{ item.subject }}</span>
                 </div>
                 {% endif %}
                 <div>
-                  <strong style="color: var(--text);">Drafted Body:</strong>
-                  <pre style="white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 11.5px; line-height: 1.5; background: var(--bg); padding: 12px; border-radius: var(--radius); margin: 6px 0 0 0; color: var(--text); border: 1px solid var(--border);">{{ item.body }}</pre>
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                    <strong style="color: var(--text);">Drafted Body:</strong>
+                    <button type="button" class="btn-copy-preview" data-copy-body="{{ item.body | e }}" aria-label="Copy message body to clipboard" style="background: none; border: none; font-size: 11.5px; color: var(--muted); cursor: pointer; display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border-radius: var(--radius-xs);">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                      <span>Copy preview</span>
+                    </button>
+                  </div>
+                  <pre class="preview-pre">{{ item.body }}</pre>
                 </div>
               </div>
             </details>
@@ -358,20 +791,25 @@
     </table>
   </div>
   {% else %}
-  <div style="text-align: center; padding: 32px 16px; color: var(--muted); font-size: 13.5px;">
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom: 8px; color: var(--success);"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
-    <p style="margin: 0;">No high-stakes actions currently pending operator review. All queues clear.</p>
+  <div style="text-align: center; padding: 36px 16px; color: var(--muted); font-size: 13.5px;">
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom: 8px; color: var(--success);"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+    <p style="margin: 0; font-weight: 500;">No high-stakes actions currently pending operator review. All queues clear.</p>
   </div>
   {% endif %}
 </section>
 
 <!-- Agent Decision Log (Audit Trail View) -->
-<section class="card" aria-labelledby="log-heading" style="margin-top: 24px;">
-  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-    <h2 id="log-heading" style="margin: 0; font-size: 17px; color: var(--text);">
-      Agent Decision Audit Trail
-    </h2>
-    <span style="font-size: 12px; color: var(--muted);">
+<section class="card" aria-labelledby="log-heading" style="margin-top: 28px;">
+  <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px;">
+    <div>
+      <h2 id="log-heading" style="margin: 0 0 4px 0; font-size: 17px; font-weight: 700; color: var(--text);">
+        Agent Decision Audit Trail
+      </h2>
+      <span style="font-size: 12.5px; color: var(--muted);">
+        Immutable event ledger for verifiable recovery policy governance
+      </span>
+    </div>
+    <span class="badge badge-slate" style="font-size: 11px; padding: 4px 10px;">
       {{ decisions | length }} most recent <code>decision.made</code> events
     </span>
   </div>
@@ -380,34 +818,39 @@
   <div class="decision-timeline">
     {% for d in decisions %}
     <div class="timeline-node">
-      <div class="timeline-marker" style="background: {% if d.strategy == 'WAIT' %}var(--muted){% elif d.review_required %}var(--warning){% else %}var(--accent){% endif %};"></div>
-      <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 6px; flex-wrap: wrap;">
-        <div>
-          <strong style="color: var(--text); font-size: 14px;">{{ d.debtor_name or d.debtor_id }}</strong>
-          <span class="badge {% if d.strategy == 'WAIT' %}badge-slate{% elif d.review_required %}badge-amber{% else %}badge-indigo{% endif %}" style="margin-left: 6px;">{{ d.strategy }}</span>
-          <span class="badge badge-slate" style="margin-left: 4px;">{{ d.action_class }}</span>
+      <div class="timeline-marker" style="background: {% if d.strategy == 'WAIT' %}var(--muted){% elif d.review_required %}var(--warning){% else %}var(--success){% endif %};"></div>
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 8px; flex-wrap: wrap;">
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+          <strong style="color: var(--text); font-size: 14px; font-weight: 700;">{{ d.debtor_name or d.debtor_id }}</strong>
+          <span class="badge {% if d.strategy == 'WAIT' %}badge-slate{% elif d.review_required %}badge-amber{% else %}badge-emerald{% endif %}">{{ d.strategy }}</span>
+          <span class="badge badge-slate font-mono">{{ d.action_class }}</span>
+          {% if d.confidence is not none %}
+          <span class="chip font-mono text-xs" style="padding: 2px 6px;">{{ (d.confidence * 100) | round(0) }}% conf</span>
+          {% endif %}
         </div>
-        <span class="tabular-nums" style="font-size: 11px; color: var(--muted); white-space: nowrap;" title="{{ d.ts }}">
+        <span class="tabular-nums font-mono" style="font-size: 11.5px; color: var(--muted); white-space: nowrap;" title="{{ d.ts }}">
           {{ d.ts[:16] | replace("T", " ") }} UTC
         </span>
       </div>
-      <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; line-height: 1.5;">
+      <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 8px; line-height: 1.55; background: var(--border-subtle); padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);">
         {{ d.reasoning }}
       </div>
       {% for r in d.rejected_actions %}
-      <div style="font-size: 11.5px; color: var(--muted);">
-        &bull; Rejected {{ r.strategy }}: {{ r.reason }}
+      <div style="font-size: 12px; color: var(--muted); margin-top: 4px; display: flex; align-items: baseline; gap: 6px;">
+        <span style="color: var(--danger); font-size: 10px;">&times;</span>
+        <span>Rejected <strong>{{ r.strategy }}</strong>: {{ r.reason }}</span>
       </div>
       {% endfor %}
-      <div style="font-size: 11.5px; color: var(--muted); margin-top: 6px;">
-        Channel {{ d.channel | upper }} &middot; {{ d.language | upper }} &middot; Tone: {{ d.tone }}
-        {% if d.confidence is not none %}&middot; Confidence: {{ d.confidence }}{% endif %}
+      <div style="font-size: 11.5px; color: var(--muted); margin-top: 10px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+        <span class="chip">Channel: {{ d.channel | upper }}</span>
+        <span class="chip">Lang: {{ d.language | upper }}</span>
+        <span class="chip">Tone: {{ d.tone }}</span>
       </div>
     </div>
     {% endfor %}
   </div>
   {% else %}
-  <p style="margin: 0; color: var(--muted); font-size: 13px; padding: 12px 0;">
+  <p style="margin: 0; color: var(--muted); font-size: 13px; padding: 14px 0;">
     No decisions recorded in the audit log yet. Execute the evaluation benchmark or the recovery pipeline to populate.
     {% if audit_log_ephemeral %}
     <em>(Current deployment has no DATABASE_URL; log is ephemeral).</em>
@@ -416,27 +859,53 @@
   {% endif %}
 </section>
 
-<!-- Native Rejection Dialog -->
-<dialog id="rejection-dialog" class="accessible-dialog" closedby="any" aria-labelledby="reject-dialog-title">
-  <form id="rejection-form" method="dialog">
-    <h3 id="reject-dialog-title">Reject Queued Action</h3>
-    <p style="font-size: 13px; color: var(--muted); margin-bottom: 14px;">
-      Specify reason for rejecting this debtor action. This reason will be stamped immutably into the audit trail.
-    </p>
-    <div style="margin-bottom: 16px;">
-      <label for="reject-reason-input" style="font-size: 12.5px; font-weight: 600; margin-bottom: 6px; display: block;">Rejection Rationale</label>
-      <input type="text" id="reject-reason-input" value="Operator commercial override" required style="margin: 0;">
-    </div>
-    <div style="display: flex; justify-content: flex-end; gap: 8px;">
-      <button type="button" id="btn-cancel-reject" class="btn btn-secondary">Cancel</button>
-      <button type="submit" id="btn-confirm-reject" class="btn btn-danger">Confirm Rejection</button>
-    </div>
-  </form>
+<!-- Native Rejection Dialog (Hardware Double-Bezel Glass Actuator) -->
+<dialog id="rejection-dialog" class="accessible-dialog" closedby="any" aria-labelledby="reject-dialog-title" aria-describedby="reject-dialog-desc">
+  <div class="dialog-inner-bezel">
+    <form id="rejection-form" method="dialog">
+      <div class="dialog-header">
+        <div class="dialog-icon-badge" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+        </div>
+        <div>
+          <h3 id="reject-dialog-title" style="font-size: 17px; font-weight: 700; margin: 0 0 2px 0; color: var(--text);">
+            Reject Queued Action
+          </h3>
+          <span style="font-size: 11.5px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;">
+            Manual Operator Override Gate
+          </span>
+        </div>
+      </div>
+      <p id="reject-dialog-desc" style="font-size: 13px; color: var(--text-secondary); margin: 10px 0 16px 0; line-height: 1.5;">
+        Specify reason for rejecting this debtor action. This reason will be stamped immutably into the audit trail.
+      </p>
+      <div style="margin-bottom: 20px;">
+        <label for="reject-reason-input" style="font-size: 12.5px; font-weight: 700; margin-bottom: 8px; display: block; color: var(--text);">
+          Rejection Rationale <span style="color: var(--danger);">*</span>
+        </label>
+        <input type="text" id="reject-reason-input" value="Operator commercial override" required style="margin: 0; min-height: 44px; border-radius: var(--radius); background: var(--surface-raised);" autocomplete="off">
+      </div>
+      <div style="display: flex; justify-content: flex-end; gap: 10px; align-items: center;">
+        <button type="button" id="btn-cancel-reject" class="btn btn-secondary btn-pill-action" style="min-height: 44px; min-width: 90px; padding: 8px 18px;">
+          <span>Cancel</span>
+        </button>
+        <button type="submit" id="btn-confirm-reject" class="btn btn-danger btn-pill-action" style="min-height: 44px; min-width: 160px; padding: 8px 20px;">
+          <span>Confirm Rejection</span>
+          <span class="btn-action-badge" aria-hidden="true" style="background: rgba(255,255,255,0.25);">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          </span>
+        </button>
+      </div>
+    </form>
+  </div>
 </dialog>
 
 <!-- Toast Container -->
 <div id="toast-container" class="toast-container" aria-live="polite"></div>
+{% endblock %}
 
+{% block scripts %}
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.2/anime.min.js"></script>
 <script>
   let killSwitchState = {{ 'true' if kill_switch_active else 'false' }};
   const operatorKey = {{ (operator_key | default('')) | tojson }};
@@ -447,6 +916,7 @@
 
   function showToast(message, type = "success") {
     const container = document.getElementById("toast-container");
+    if (!container) return;
     while (container.children.length >= 3) {
       container.firstChild.remove();
     }
@@ -456,7 +926,9 @@
 
     const iconSvg = type === "success"
       ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>'
-      : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>';
+      : (type === "info"
+        ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>'
+        : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>');
 
     const contentWrap = document.createElement("div");
     contentWrap.style.display = "flex";
@@ -474,8 +946,9 @@
     closeBtn.style.color = "var(--muted)";
     closeBtn.style.display = "inline-flex";
     closeBtn.style.alignItems = "center";
-    closeBtn.style.minHeight = "24px";
-    closeBtn.style.minWidth = "24px";
+    closeBtn.style.justifyContent = "center";
+    closeBtn.style.minHeight = "44px";
+    closeBtn.style.minWidth = "44px";
     closeBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
     closeBtn.onclick = () => toast.remove();
 
@@ -483,37 +956,210 @@
     toast.appendChild(closeBtn);
     container.appendChild(toast);
 
+    if (typeof anime !== 'undefined' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      anime({
+        targets: toast,
+        opacity: [0, 1],
+        translateY: [16, 0],
+        duration: 220,
+        easing: 'cubicBezier(0.16, 1, 0.3, 1)'
+      });
+    }
+
     setTimeout(() => {
-      toast.style.opacity = "0";
-      toast.style.transition = "opacity 0.3s ease";
-      setTimeout(() => toast.remove(), 300);
-    }, 4000);
+      if (!toast.parentNode) return;
+      if (typeof anime !== 'undefined' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        anime({
+          targets: toast,
+          opacity: [1, 0],
+          translateY: [0, 8],
+          duration: 220,
+          easing: 'easeInQuad',
+          complete: () => toast.remove()
+        });
+      } else {
+        toast.style.opacity = "0";
+        toast.style.transition = "opacity 0.2s ease";
+        setTimeout(() => toast.remove(), 200);
+      }
+    }, 4200);
   }
 
-  // Master Kill Switch
-  document.getElementById("toggle-kill-switch").addEventListener("click", async () => {
-    const newState = !killSwitchState;
+  // Reactive Kill Switch UI updater
+  function updateKillSwitchUI(isActive) {
+    const section = document.getElementById("kill-switch-section");
     const btn = document.getElementById("toggle-kill-switch");
-    btn.disabled = true;
-    btn.textContent = "Updating status...";
-    try {
-      const res = await fetch("/api/operator/kill-switch", {
-        method: "POST",
-        headers: authHeaders,
-        body: JSON.stringify({ active: newState }),
-      });
-      if (res.ok) {
-        window.location.reload();
+    const desc = document.getElementById("kill-switch-desc");
+    const badge = document.getElementById("kill-indicator-badge");
+
+    if (section) {
+      if (isActive) {
+        section.classList.remove("running");
+        section.classList.add("halted");
       } else {
-        const errData = await res.json().catch(() => ({}));
-        showToast("Failed to toggle kill switch: " + (errData.detail || errData.error || res.statusText), "error");
-        btn.disabled = false;
+        section.classList.remove("halted");
+        section.classList.add("running");
       }
-    } catch (err) {
-      showToast("Network error toggling kill switch: " + err, "error");
-      btn.disabled = false;
     }
-  });
+
+    if (badge) {
+      badge.style.color = isActive ? "var(--danger)" : "var(--success)";
+      badge.innerHTML = `
+        <span class="radar-dot-wrap" aria-hidden="true">
+          <span class="radar-ring"></span>
+          <span class="pulse-dot ${isActive ? 'danger' : 'success'}"></span>
+        </span>
+        <span class="kill-indicator-label">${isActive ? 'ENGAGED (Halted)' : 'ACTIVE (Normal Operation)'}</span>
+      `;
+    }
+
+    if (btn) {
+      btn.disabled = false;
+      if (isActive) {
+        btn.className = "btn btn-actuator btn-secondary is-halted";
+        btn.innerHTML = `
+          <span class="btn-text">Deactivate Kill Switch (Resume Agents)</span>
+          <span class="btn-badge-icon" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+          </span>
+        `;
+      } else {
+        btn.className = "btn btn-actuator btn-danger is-running";
+        btn.innerHTML = `
+          <span class="btn-text">Activate Master Kill Switch (Halt Agents)</span>
+          <span class="btn-badge-icon" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"></rect></svg>
+          </span>
+        `;
+      }
+
+      if (typeof anime !== 'undefined' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        anime({
+          targets: btn,
+          scale: [0.97, 1],
+          duration: 300,
+          easing: 'cubicBezier(0.16, 1, 0.3, 1)'
+        });
+      }
+    }
+
+    if (desc) {
+      if (isActive) {
+        desc.innerHTML = `
+          <span class="kill-indicator" style="color: var(--danger);">
+            <span class="pulse-dot danger"></span>
+            ENGAGED (Halted)
+          </span>
+          &mdash; All automated and queued outbound agent communications are strictly halted across all instances.
+        `;
+      } else {
+        desc.innerHTML = `
+          <span class="kill-indicator" style="color: var(--success);">
+            <span class="pulse-dot success"></span>
+            ACTIVE (Normal Operation)
+          </span>
+          &mdash; Continuous recovery pipeline is operating normally. Click to immediately halt all agent dispatches.
+        `;
+      }
+    }
+  }
+
+  // Master Kill Switch Event Handler
+  const killSwitchBtn = document.getElementById("toggle-kill-switch");
+  if (killSwitchBtn) {
+    killSwitchBtn.addEventListener("click", async () => {
+      const newState = !killSwitchState;
+      killSwitchBtn.disabled = true;
+      const btnText = killSwitchBtn.querySelector(".btn-text");
+      if (btnText) btnText.textContent = "Updating status...";
+
+      try {
+        const res = await fetch("/api/operator/kill-switch", {
+          method: "POST",
+          headers: authHeaders,
+          body: JSON.stringify({ active: newState }),
+        });
+        if (res.ok) {
+          killSwitchState = newState;
+          updateKillSwitchUI(newState);
+          showToast(newState ? "Master kill switch ENGAGED: outbound dispatches halted." : "Master kill switch DEACTIVATED: continuous recovery resumed.", "info");
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          showToast("Failed to toggle kill switch: " + (errData.detail || errData.error || res.statusText), "error");
+          updateKillSwitchUI(killSwitchState);
+        }
+      } catch (err) {
+        showToast("Network error toggling kill switch: " + err, "error");
+        updateKillSwitchUI(killSwitchState);
+      }
+    });
+  }
+
+  // Reactive Queue State Manager
+  function updateQueueCount() {
+    const rows = document.querySelectorAll("tr.item-row");
+    const heading = document.getElementById("queue-heading");
+    if (heading) {
+      heading.textContent = "Review-first mode: pending human approvals (" + rows.length + ")";
+    }
+    if (rows.length === 0) {
+      const tableWrap = document.querySelector(".queue-table-wrap");
+      if (tableWrap) {
+        tableWrap.innerHTML = `
+          <div style="text-align: center; padding: 36px 16px; color: var(--muted); font-size: 13.5px;">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom: 8px; color: var(--success);"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+            <p style="margin: 0; font-weight: 500;">No high-stakes actions currently pending operator review. All queues clear.</p>
+          </div>
+        `;
+      }
+    }
+  }
+
+  // Helper to remove row cleanly and manage focus
+  function removeRowWithFocusManagement(row, nextFocusCandidate) {
+    const nextRow = row.nextElementSibling;
+    const detailsRow = nextRow && nextRow.classList.contains("details-row") ? nextRow : null;
+    const nextItemRow = detailsRow ? detailsRow.nextElementSibling : nextRow;
+    const nextBtn = nextFocusCandidate || (nextItemRow ? nextItemRow.querySelector(".btn-approve, .btn-reject") : null);
+
+    if (typeof anime !== 'undefined' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      const targets = detailsRow ? [row, detailsRow] : [row];
+      anime({
+        targets: targets,
+        opacity: [1, 0],
+        translateX: [0, -12],
+        duration: 180,
+        easing: 'cubicBezier(0.16, 1, 0.3, 1)',
+        complete: () => {
+          if (detailsRow) detailsRow.remove();
+          row.remove();
+          updateQueueCount();
+          if (nextBtn && typeof nextBtn.focus === "function") {
+            nextBtn.focus();
+          } else {
+            const heading = document.getElementById("queue-heading");
+            if (heading) {
+              heading.setAttribute("tabindex", "-1");
+              heading.focus();
+            }
+          }
+        }
+      });
+    } else {
+      if (detailsRow) detailsRow.remove();
+      row.remove();
+      updateQueueCount();
+      if (nextBtn && typeof nextBtn.focus === "function") {
+        nextBtn.focus();
+      } else {
+        const heading = document.getElementById("queue-heading");
+        if (heading) {
+          heading.setAttribute("tabindex", "-1");
+          heading.focus();
+        }
+      }
+    }
+  }
 
   // Approval handler
   async function approveItem(debtorId, btn) {
@@ -534,9 +1180,7 @@
       if (data.approved) {
         const row = btn ? btn.closest("tr.item-row") : document.querySelector(".row-" + debtorId);
         if (row) {
-          const nextRow = row.nextElementSibling;
-          if (nextRow && nextRow.classList.contains("details-row")) nextRow.remove();
-          row.remove();
+          removeRowWithFocusManagement(row);
         }
         showToast("Action approved & dispatched for " + debtorId, "success");
       } else {
@@ -549,22 +1193,42 @@
     }
   }
 
-  // Native Dialog Rejection Flow (modern-web-guidance)
+  // Native Dialog Rejection Flow
   const rejectDialog = document.getElementById("rejection-dialog");
   const rejectReasonInput = document.getElementById("reject-reason-input");
   const btnConfirmReject = document.getElementById("btn-confirm-reject");
   let activeRejectDebtorId = null;
   let activeRejectRow = null;
+  let activeRejectTriggerBtn = null;
 
   function openRejectDialog(debtorId, btn) {
     activeRejectDebtorId = debtorId;
     activeRejectRow = btn ? btn.closest("tr.item-row") : null;
-    rejectReasonInput.value = "Operator commercial override";
+    activeRejectTriggerBtn = btn || document.activeElement;
+    if (rejectReasonInput) rejectReasonInput.value = "Operator commercial override";
+
     if (typeof rejectDialog.showModal === "function") {
       rejectDialog.showModal();
     } else {
       rejectDialog.setAttribute("open", "");
     }
+
+    if (typeof anime !== 'undefined' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      anime({
+        targets: '#rejection-dialog',
+        opacity: [0, 1],
+        scale: [0.94, 1],
+        duration: 220,
+        easing: 'cubicBezier(0.16, 1, 0.3, 1)'
+      });
+    }
+
+    setTimeout(() => {
+      if (rejectReasonInput) {
+        rejectReasonInput.focus();
+        rejectReasonInput.select();
+      }
+    }, 40);
   }
 
   function closeRejectDialog() {
@@ -573,22 +1237,28 @@
     } else {
       rejectDialog.removeAttribute("open");
     }
+    if (activeRejectTriggerBtn && document.body.contains(activeRejectTriggerBtn) && typeof activeRejectTriggerBtn.focus === "function") {
+      activeRejectTriggerBtn.focus();
+    }
     activeRejectDebtorId = null;
     activeRejectRow = null;
   }
 
-  document.getElementById("btn-cancel-reject").addEventListener("click", closeRejectDialog);
-  rejectDialog.addEventListener("cancel", () => {
-    activeRejectDebtorId = null;
-    activeRejectRow = null;
-  });
-  rejectDialog.addEventListener("close", () => {
-    activeRejectDebtorId = null;
-    activeRejectRow = null;
-  });
+  const btnCancelReject = document.getElementById("btn-cancel-reject");
+  if (btnCancelReject) {
+    btnCancelReject.addEventListener("click", closeRejectDialog);
+  }
 
-  // modern-web-guidance light-dismiss fallback for browsers without closedby support
-  if (!('closedBy' in HTMLDialogElement.prototype)) {
+  if (rejectDialog) {
+    rejectDialog.addEventListener("cancel", () => {
+      if (activeRejectTriggerBtn && document.body.contains(activeRejectTriggerBtn) && typeof activeRejectTriggerBtn.focus === "function") {
+        activeRejectTriggerBtn.focus();
+      }
+      activeRejectDebtorId = null;
+      activeRejectRow = null;
+    });
+
+    // Light-dismiss backdrop click
     rejectDialog.addEventListener('click', (event) => {
       if (event.target !== rejectDialog) return;
       const rect = rejectDialog.getBoundingClientRect();
@@ -600,52 +1270,97 @@
       );
       if (!isContent) closeRejectDialog();
     });
+
+    // Dialog Focus Trap for accessible modal navigation
+    rejectDialog.addEventListener('keydown', (e) => {
+      if (e.key === 'Tab') {
+        const focusables = rejectDialog.querySelectorAll('input, button:not([disabled])');
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    });
   }
 
-  document.getElementById("rejection-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const reason = rejectReasonInput.value.trim() || "Operator commercial override";
-    const debtorId = activeRejectDebtorId;
-    const targetRow = activeRejectRow;
-    
-    if (!debtorId) {
-      closeRejectDialog();
-      return;
-    }
-
-    btnConfirmReject.disabled = true;
-    btnConfirmReject.textContent = "Rejecting...";
-
-    try {
-      const res = await fetch("/api/operator/reject", {
-        method: "POST",
-        headers: authHeaders,
-        body: JSON.stringify({ debtor_id: debtorId, reason: reason }),
-      });
-      closeRejectDialog();
-
-      if (res.ok) {
-        const row = targetRow || document.querySelector(".row-" + debtorId);
-        if (row) {
-          const nextRow = row.nextElementSibling;
-          if (nextRow && nextRow.classList.contains("details-row")) nextRow.remove();
-          row.remove();
-        }
-        showToast("Action rejected with reason: " + reason, "success");
-      } else {
-        const errData = await res.json().catch(() => ({}));
-        showToast("Rejection failed: " + (errData.detail || errData.error || res.statusText), "error");
+  const rejectionForm = document.getElementById("rejection-form");
+  if (rejectionForm) {
+    rejectionForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const reason = (rejectReasonInput ? rejectReasonInput.value.trim() : "") || "Operator commercial override";
+      const debtorId = activeRejectDebtorId;
+      const targetRow = activeRejectRow;
+      
+      if (!debtorId) {
+        closeRejectDialog();
+        return;
       }
-    } catch (err) {
-      closeRejectDialog();
-      showToast("Rejection error: " + err, "error");
-    } finally {
-      btnConfirmReject.disabled = false;
-      btnConfirmReject.textContent = "Confirm Rejection";
-    }
+
+      if (btnConfirmReject) {
+        btnConfirmReject.disabled = true;
+        const btnText = btnConfirmReject.querySelector("span");
+        if (btnText) btnText.textContent = "Rejecting...";
+      }
+
+      try {
+        const res = await fetch("/api/operator/reject", {
+          method: "POST",
+          headers: authHeaders,
+          body: JSON.stringify({ debtor_id: debtorId, reason: reason }),
+        });
+        closeRejectDialog();
+
+        if (res.ok) {
+          const row = targetRow || document.querySelector(".row-" + debtorId);
+          if (row) {
+            removeRowWithFocusManagement(row);
+          }
+          showToast("Action rejected with reason: " + reason, "success");
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          showToast("Rejection failed: " + (errData.detail || errData.error || res.statusText), "error");
+        }
+      } catch (err) {
+        closeRejectDialog();
+        showToast("Rejection error: " + err, "error");
+      } finally {
+        if (btnConfirmReject) {
+          btnConfirmReject.disabled = false;
+          const btnText = btnConfirmReject.querySelector("span");
+          if (btnText) btnText.textContent = "Confirm Rejection";
+        }
+      }
+    });
+  }
+
+  // Copy Preview Buttons
+  document.querySelectorAll(".btn-copy-preview").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const text = btn.getAttribute("data-copy-body");
+      if (!text) return;
+      try {
+        await navigator.clipboard.writeText(text);
+        const label = btn.querySelector("span");
+        if (label) {
+          const original = label.textContent;
+          label.textContent = "Copied!";
+          setTimeout(() => label.textContent = original, 1800);
+        }
+        showToast("Drafted message body copied to clipboard", "success");
+      } catch (err) {
+        showToast("Clipboard access denied", "error");
+      }
+    });
   });
 
-  // Attach button listeners
+  // Attach button listeners to review queue actions
   document.querySelectorAll(".btn-approve").forEach((btn) => {
     btn.addEventListener("click", () => {
       const debtorId = btn.getAttribute("data-debtor-id");

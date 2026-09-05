@@ -2,54 +2,126 @@
 
 {% block title %}Invoice #{{ invoice.invoice_id }} Resolution | {{ invoice.supplier }}{% endblock %}
 
+{% block head %}
+<link rel="preconnect" href="https://checkout.razorpay.com">
+{% endblock %}
+
 {% block wrap_class %}wrap-narrow{% endblock %}
 {% block nav %}{% endblock %}
 {% block footer %}{% endblock %}
 
 {% block content %}
 <style>
-  /* Custom styles for resolution portal */
+  /* High-End Resolution Surface Architecture */
   .resolution-container {
     max-width: 580px;
-    margin: 20px auto 60px;
+    width: 100%;
+    margin: 16px auto 64px;
     display: flex;
     flex-direction: column;
-    gap: 24px;
+    gap: 20px;
+    box-sizing: border-box;
   }
 
-  /* Trust & Security Banner */
+  /* Double-Bezel Hardware Architecture */
+  .double-bezel-card {
+    position: relative;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    box-shadow: 
+      0 1px 2px rgba(0, 0, 0, 0.04),
+      0 8px 24px -4px rgba(0, 0, 0, 0.06),
+      inset 0 1px 0 rgba(255, 255, 255, 0.85);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+                box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+                border-color 0.25s ease;
+  }
+  [data-theme="dark"] .double-bezel-card,
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .double-bezel-card {
+      box-shadow: 
+        0 1px 2px rgba(0, 0, 0, 0.5),
+        0 12px 32px -6px rgba(0, 0, 0, 0.7),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    }
+  }
+
+  /* Trust & Security Banner (Double-Bezel Micro Card) */
   .trust-banner {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 10px 16px;
+    padding: 11px 18px;
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-lg);
     font-size: 12px;
     color: var(--muted);
+    box-shadow: 
+      0 1px 2px rgba(0, 0, 0, 0.03),
+      inset 0 1px 0 rgba(255, 255, 255, 0.7);
+    gap: 12px;
+  }
+  [data-theme="dark"] .trust-banner,
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .trust-banner {
+      box-shadow: 
+        0 1px 2px rgba(0, 0, 0, 0.4),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    }
   }
   .trust-badge {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     font-weight: 600;
     color: var(--text-secondary);
   }
-  .trust-badge svg {
+  .trust-shield-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 6px;
+    background: var(--success-light);
     color: var(--success);
+    border: 1px solid var(--success-border);
+    flex-shrink: 0;
+  }
+  .trust-encryption {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--muted);
+    font-size: 11.5px;
+    font-weight: 500;
+    white-space: nowrap;
   }
 
   /* Header Card */
   .header-card {
     text-align: center;
-    padding: 36px 24px 28px;
-    border-radius: var(--radius-lg);
+    padding: 36px 28px 30px;
+    border-radius: 20px;
     background: var(--surface);
     border: 1px solid var(--border);
-    box-shadow: var(--shadow-sm);
+    box-shadow: 
+      0 1px 2px rgba(0, 0, 0, 0.04),
+      0 12px 36px -6px rgba(0, 0, 0, 0.08),
+      inset 0 1px 0 rgba(255, 255, 255, 0.9);
     position: relative;
     overflow: hidden;
+  }
+  [data-theme="dark"] .header-card,
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .header-card {
+      box-shadow: 
+        0 1px 2px rgba(0, 0, 0, 0.5),
+        0 16px 40px -8px rgba(0, 0, 0, 0.75),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    }
   }
   .header-card::before {
     content: '';
@@ -58,52 +130,79 @@
     left: 0;
     right: 0;
     height: 4px;
-    background: linear-gradient(90deg, var(--accent) 0%, #38bdf8 100%);
+    background: linear-gradient(90deg, #10b981 0%, #3b82f6 50%, #8b5cf6 100%);
   }
   .supplier-name {
-    font-size: 1.25rem;
+    font-size: clamp(1.2rem, 3.5vw, 1.45rem);
     color: var(--text);
     font-weight: 700;
-    letter-spacing: -0.015em;
-    margin-bottom: 4px;
+    letter-spacing: -0.02em;
+    margin-bottom: 6px;
+    line-height: 1.25;
   }
   .invoice-id-wrap {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 7px;
     font-size: 0.85rem;
     color: var(--muted);
-    margin-bottom: 20px;
+    background: var(--surface-raised);
+    padding: 4px 12px;
+    border-radius: 9999px;
+    border: 1px solid var(--border-subtle);
+    margin-bottom: 22px;
   }
   .amount-huge {
-    font-size: clamp(2.25rem, 5vw, 2.75rem);
+    font-size: clamp(2.35rem, 6vw, 3rem);
     font-weight: 800;
     color: var(--text);
-    margin: 12px 0 16px;
-    letter-spacing: -0.03em;
-    line-height: 1.15;
+    margin: 8px 0 14px;
+    letter-spacing: -0.035em;
+    line-height: 1.1;
     font-variant-numeric: tabular-nums;
   }
   .amount-label {
     font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.07em;
     color: var(--muted);
   }
+  .chip-overdue {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 5px 12px;
+    border-radius: 9999px;
+    letter-spacing: 0.01em;
+  }
+  .pulse-indicator {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+    display: inline-block;
+  }
   
-  /* Timeline Component - No horizontal overflow */
+  /* Timeline Component - Accessible & Fluid */
   .timeline {
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-start;
     margin-top: 28px;
-    padding: 16px;
-    background: var(--bg);
+    padding: 18px 20px 16px;
+    list-style: none;
+    margin-left: 0;
+    padding-left: 20px;
+    background: var(--surface-raised);
     border: 1px solid var(--border-subtle);
-    border-radius: var(--radius);
+    border-radius: var(--radius-md);
     font-size: 0.8rem;
     position: relative;
+    box-sizing: border-box;
+    width: 100%;
   }
   .timeline-step {
     display: flex;
@@ -113,144 +212,408 @@
     position: relative;
     flex: 1;
     z-index: 2;
+    text-align: center;
+  }
+  .timeline-step.completed {
+    color: var(--text-secondary);
   }
   .timeline-step.active {
     color: var(--text);
     font-weight: 700;
   }
   .timeline-dot {
-    width: 14px;
-    height: 14px;
+    width: 22px;
+    height: 22px;
     border-radius: 50%;
-    background: var(--border);
-    border: 2px solid var(--surface);
-    margin-bottom: 6px;
-    transition: all 0.2s ease;
+    background: var(--surface);
+    border: 2px solid var(--border);
+    margin-bottom: 8px;
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    box-sizing: border-box;
+  }
+  .timeline-step.completed .timeline-dot {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-text);
   }
   .timeline-step.active .timeline-dot {
+    background: var(--surface);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 4px var(--accent-light);
+  }
+  .timeline-check {
+    width: 11px;
+    height: 11px;
+  }
+  .timeline-inner-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
     background: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-light);
   }
   .timeline-step:not(:last-child)::after {
     content: '';
     position: absolute;
-    top: 6px;
+    top: 10px;
     left: 50%;
     width: 100%;
     height: 2px;
     background: var(--border);
     z-index: -1;
+    transition: background 0.25s ease;
   }
-  .timeline-step.active:not(:last-child)::after {
+  .timeline-step.completed:not(:last-child)::after {
     background: var(--accent);
+  }
+  .timeline-label {
+    font-size: 0.8rem;
+    line-height: 1.3;
   }
 
   /* Action Cards (The 3 Doors) */
   .action-card {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    padding: 28px 24px;
-    box-shadow: var(--shadow-sm);
-    transition: box-shadow 0.2s ease, border-color 0.2s ease;
+    border-radius: 20px;
+    padding: 26px 24px;
+    box-shadow: 
+      0 1px 2px rgba(0, 0, 0, 0.04),
+      0 6px 18px -3px rgba(0, 0, 0, 0.06),
+      inset 0 1px 0 rgba(255, 255, 255, 0.85);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+                box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+                border-color 0.25s ease;
+    position: relative;
+  }
+  [data-theme="dark"] .action-card,
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .action-card {
+      box-shadow: 
+        0 1px 2px rgba(0, 0, 0, 0.4),
+        0 10px 24px -4px rgba(0, 0, 0, 0.65),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    }
   }
   .action-card:hover {
-    box-shadow: var(--shadow);
-    border-color: var(--muted);
+    transform: translateY(-2px);
+    box-shadow: 
+      0 4px 12px rgba(0, 0, 0, 0.06),
+      0 16px 32px -4px rgba(0, 0, 0, 0.09);
   }
-  .action-card h3 {
-    margin-top: 0;
-    margin-bottom: 8px;
-    font-size: 1.2rem;
-    font-weight: 700;
-    letter-spacing: -0.015em;
+  #door-pay:hover {
+    border-color: rgba(16, 185, 129, 0.45);
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.08), 0 16px 32px -4px rgba(16, 185, 129, 0.14);
+  }
+  #door-promise:hover {
+    border-color: rgba(245, 158, 11, 0.45);
+    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.08), 0 16px 32px -4px rgba(245, 158, 11, 0.14);
+  }
+  #door-dispute:hover {
+    border-color: rgba(239, 68, 68, 0.45);
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.08), 0 16px 32px -4px rgba(239, 68, 68, 0.14);
+  }
+
+  .door-header {
     display: flex;
     align-items: center;
-    gap: 10px;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .door-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .door-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .door-icon-emerald {
+    background: rgba(16, 185, 129, 0.12);
+    color: #059669;
+    border: 1px solid rgba(16, 185, 129, 0.25);
+  }
+  [data-theme="dark"] .door-icon-emerald,
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .door-icon-emerald {
+      background: rgba(16, 185, 129, 0.2);
+      color: #34d399;
+      border-color: rgba(16, 185, 129, 0.4);
+    }
+  }
+  .door-icon-amber {
+    background: rgba(245, 158, 11, 0.12);
+    color: #d97706;
+    border: 1px solid rgba(245, 158, 11, 0.25);
+  }
+  [data-theme="dark"] .door-icon-amber,
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .door-icon-amber {
+      background: rgba(245, 158, 11, 0.2);
+      color: #fbbf24;
+      border-color: rgba(245, 158, 11, 0.4);
+    }
+  }
+  .door-icon-rose {
+    background: rgba(239, 68, 68, 0.12);
+    color: #dc2626;
+    border: 1px solid rgba(239, 68, 68, 0.25);
+  }
+  [data-theme="dark"] .door-icon-rose,
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .door-icon-rose {
+      background: rgba(239, 68, 68, 0.2);
+      color: #f87171;
+      border-color: rgba(239, 68, 68, 0.4);
+    }
+  }
+
+  .action-card h3 {
+    margin: 0;
+    font-size: 1.18rem;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    color: var(--text);
   }
   .action-card p {
     color: var(--muted);
     margin-bottom: 20px;
     font-size: 0.9rem;
-    line-height: 1.5;
+    line-height: 1.55;
   }
+  .door-tag {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 9px;
+    border-radius: 9999px;
+    white-space: nowrap;
+  }
+
+  /* Form Elements */
   .action-form {
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 16px;
   }
   .form-group {
     display: flex;
     flex-direction: column;
     gap: 6px;
   }
+  .form-label-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 4px;
+  }
   .form-group label {
     font-size: 0.875rem;
     font-weight: 600;
     color: var(--text);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
+    margin-bottom: 0;
   }
   .char-count {
-    font-size: 11px;
+    font-size: 11.5px;
     color: var(--muted);
-    font-weight: normal;
+    font-variant-numeric: tabular-nums;
   }
-  .form-group input, .form-group textarea {
+  .form-group input,
+  .form-group textarea {
     padding: 12px 14px;
     border: 1.5px solid var(--border);
     border-radius: var(--radius);
     background: var(--bg);
     color: var(--text);
     font-family: inherit;
-    font-size: 15px; /* >= 16px on mobile prevents iOS zoom */
+    font-size: 15px;
     width: 100%;
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    box-sizing: border-box;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease;
   }
-  .form-group input:focus, .form-group textarea:focus {
+  @media (max-width: 768px) {
+    .form-group input,
+    .form-group textarea {
+      font-size: 16px !important;
+    }
+  }
+  .form-group input:focus-visible,
+  .form-group textarea:focus-visible {
     outline: none;
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--accent-light);
   }
+  .form-group textarea {
+    min-height: 88px;
+    resize: vertical;
+    line-height: 1.5;
+  }
+
+  /* Button Architecture */
   .btn-huge {
     width: 100%;
-    padding: 14px 20px;
-    min-height: 48px;
+    padding: 14px 24px;
+    min-height: 52px;
     font-size: 1.05rem;
     font-weight: 700;
     letter-spacing: -0.01em;
     text-align: center;
-    border-radius: var(--radius);
-    box-shadow: 0 2px 4px rgba(79, 70, 229, 0.2);
+    border-radius: 9999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    cursor: pointer;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    color: #ffffff;
+    box-shadow: 
+      0 1px 2px rgba(0, 0, 0, 0.08),
+      0 8px 20px -4px rgba(16, 185, 129, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.35);
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   }
+  .btn-huge:hover:not([disabled]) {
+    transform: translateY(-2px);
+    box-shadow: 
+      0 4px 8px rgba(0, 0, 0, 0.12),
+      0 14px 28px -4px rgba(16, 185, 129, 0.5),
+      inset 0 1px 0 rgba(255, 255, 255, 0.45);
+    background: linear-gradient(135deg, #059669 0%, #047857 100%);
+  }
+  .btn-huge:active:not([disabled]) {
+    transform: translateY(1px);
+    box-shadow: 
+      0 1px 2px rgba(0, 0, 0, 0.1),
+      0 4px 12px -2px rgba(16, 185, 129, 0.3);
+  }
+  .btn-huge::after {
+    content: "→";
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.22);
+    font-size: 14px;
+    line-height: 1;
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), background 0.2s ease;
+  }
+  .btn-huge:hover:not([disabled])::after {
+    transform: translateX(4px);
+    background: rgba(255, 255, 255, 0.32);
+  }
+
+  /* Button-in-Button Secondary Action Triggers */
+  .btn-door-action {
+    width: 100%;
+    padding: 12px 20px;
+    min-height: 48px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    border-radius: 9999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    cursor: pointer;
+    border: 1.5px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .btn-door-action:hover:not([disabled]) {
+    transform: translateY(-1px);
+    border-color: var(--muted);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+    background: var(--surface-raised);
+  }
+  .btn-door-action:active:not([disabled]) {
+    transform: translateY(1px);
+  }
+  .btn-door-amber:hover:not([disabled]) {
+    border-color: rgba(245, 158, 11, 0.5);
+    box-shadow: 0 6px 16px -3px rgba(245, 158, 11, 0.2);
+  }
+  .btn-door-rose:hover:not([disabled]) {
+    border-color: rgba(239, 68, 68, 0.5);
+    box-shadow: 0 6px 16px -3px rgba(239, 68, 68, 0.2);
+  }
+  .btn-icon-pill {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--border-subtle);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), background 0.2s ease, color 0.2s ease;
+  }
+  .btn-door-action:hover:not([disabled]) .btn-icon-pill {
+    transform: translateX(3px);
+  }
+  .btn-door-amber:hover:not([disabled]) .btn-icon-pill {
+    background: rgba(245, 158, 11, 0.15);
+    color: #d97706;
+    border-color: rgba(245, 158, 11, 0.3);
+  }
+  .btn-door-rose:hover:not([disabled]) .btn-icon-pill {
+    background: rgba(239, 68, 68, 0.15);
+    color: #dc2626;
+    border-color: rgba(239, 68, 68, 0.3);
+  }
+
   .btn-dispute {
     color: var(--danger);
-    border-color: rgba(220, 38, 38, 0.3);
-    background: var(--surface);
   }
-  .btn-dispute:hover {
-    background: var(--danger-light);
-    border-color: var(--danger);
-  }
+
+  /* Compliance & Statutory Footer */
   .compliance-note {
     text-align: center;
     font-size: 0.8rem;
     color: var(--muted);
-    margin-top: 12px;
+    margin-top: 8px;
     padding: 0 16px;
-    line-height: 1.5;
+    line-height: 1.55;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
   }
 
   /* Status message styles */
   .status {
     margin-top: 14px;
     font-size: 0.875rem;
-    padding: 12px 16px;
+    padding: 13px 18px;
     border-radius: var(--radius);
     display: none;
     white-space: pre-line;
     line-height: 1.5;
+    animation: statusReveal 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  @keyframes statusReveal {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
   .status:not(:empty) {
     display: block;
@@ -258,12 +621,56 @@
   .status.ok {
     background: var(--success-light);
     color: var(--success);
-    border: 1px solid rgba(34, 197, 94, 0.3);
+    border: 1px solid var(--success-border);
+    box-shadow: 0 2px 8px -2px rgba(22, 101, 52, 0.15);
   }
   .status.err {
     background: var(--danger-light);
     color: var(--danger);
-    border: 1px solid rgba(239, 68, 68, 0.3);
+    border: 1px solid var(--danger-border);
+    box-shadow: 0 2px 8px -2px rgba(220, 38, 38, 0.15);
+  }
+
+  /* Fluid Reflow down to 320px */
+  @media (max-width: 480px) {
+    .resolution-container {
+      gap: 16px;
+      margin-top: 8px;
+      margin-bottom: 40px;
+    }
+    .trust-banner {
+      flex-direction: column;
+      text-align: center;
+      gap: 6px;
+      padding: 10px 14px;
+    }
+    .header-card {
+      padding: 26px 18px 22px;
+    }
+    .amount-huge {
+      font-size: 2.2rem;
+    }
+    .timeline {
+      padding: 14px 10px 12px;
+    }
+    .action-card {
+      padding: 20px 16px;
+    }
+    .door-header {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 8px;
+    }
+  }
+
+  /* Motion Sensitivity - Impeccable */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 </style>
 
@@ -271,10 +678,15 @@
   <!-- Trust & Security Banner -->
   <aside class="trust-banner" aria-label="Portal Security Verification">
     <div class="trust-badge">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+      <span class="trust-shield-icon" aria-hidden="true">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
+      </span>
       <span>Razorpay Verified Enterprise Surface</span>
     </div>
-    <span>256-bit TLS Encrypted</span>
+    <div class="trust-encryption">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      <span>256-bit TLS Encrypted</span>
+    </div>
   </aside>
 
   <!-- Header Card -->
@@ -297,34 +709,52 @@
       {% set badge_class = 'badge-rose' %}
     {% endif %}
     
-    <span class="chip {{ badge_class }}">
+    <span class="chip-overdue {{ badge_class }}">
+      <span class="pulse-indicator" aria-hidden="true"></span>
       {{ overdue_days }} Days Overdue
     </span>
     
     <!-- Lifecycle Timeline -->
     {% set outcome = {'PAID': 'Paid', 'PARTIALLY_PAID': 'Part paid', 'PROMISED': 'Date agreed', 'DISPUTED': 'Disputed'}.get(invoice.status) %}
-    <div class="timeline" aria-label="Invoice Settlement Lifecycle">
-      <div class="timeline-step{% if not outcome %} active{% endif %}">
-        <div class="timeline-dot" aria-hidden="true"></div>
-        <span>Issued</span>
-      </div>
-      <div class="timeline-step{% if not outcome %} active{% endif %}">
-        <div class="timeline-dot" aria-hidden="true"></div>
-        <span>Overdue</span>
-      </div>
-      <div class="timeline-step{% if outcome %} active{% endif %}">
-        <div class="timeline-dot" aria-hidden="true"></div>
-        <span>{{ outcome or 'Resolved' }}</span>
-      </div>
-    </div>
+    <ol class="timeline" aria-label="Invoice Settlement Lifecycle">
+      <li class="timeline-step completed">
+        <div class="timeline-dot" aria-hidden="true">
+          <svg class="timeline-check" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="2.5 6 5 8.5 9.5 3.5"/></svg>
+        </div>
+        <span class="timeline-label">Issued</span>
+      </li>
+      <li class="timeline-step{% if not outcome %} active{% else %} completed{% endif %}"{% if not outcome %} aria-current="step"{% endif %}>
+        <div class="timeline-dot" aria-hidden="true">
+          {% if outcome %}
+          <svg class="timeline-check" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="2.5 6 5 8.5 9.5 3.5"/></svg>
+          {% else %}
+          <span class="timeline-inner-dot"></span>
+          {% endif %}
+        </div>
+        <span class="timeline-label">Overdue{% if not outcome %} <span class="sr-only">(Current Stage)</span>{% endif %}</span>
+      </li>
+      <li class="timeline-step{% if outcome %} active{% endif %}"{% if outcome %} aria-current="step"{% endif %}>
+        <div class="timeline-dot" aria-hidden="true">
+          {% if outcome %}
+          <span class="timeline-inner-dot"></span>
+          {% endif %}
+        </div>
+        <span class="timeline-label">{{ outcome or 'Resolved' }}{% if outcome %} <span class="sr-only">(Current Stage)</span>{% endif %}</span>
+      </li>
+    </ol>
   </header>
 
   <!-- Door 1: Pay Now -->
   <section class="action-card" id="door-pay" aria-labelledby="pay-heading">
-    <h3 id="pay-heading">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--success);"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
-      Pay Now
-    </h3>
+    <div class="door-header">
+      <div class="door-title-wrap">
+        <div class="door-icon door-icon-emerald" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+        </div>
+        <h3 id="pay-heading">Pay Now</h3>
+      </div>
+      <span class="door-tag badge-emerald">Instant Settlement</span>
+    </div>
     <p>Settle your balance instantly via UPI (GPay, PhonePe, Paytm), Corporate Netbanking, or Cards. Immediate reconciliation &amp; contact suppression.</p>
     <button id="pay" class="btn-primary btn-huge">Pay ₹{{ amount_display }}</button>
     <div id="pay-status" class="status" role="status" aria-live="polite"></div>
@@ -332,43 +762,64 @@
 
   <!-- Door 2: Promise a Date -->
   <section class="action-card" id="door-promise" aria-labelledby="promise-heading">
-    <h3 id="promise-heading">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--warning);"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-      Promise a Date
-    </h3>
+    <div class="door-header">
+      <div class="door-title-wrap">
+        <div class="door-icon door-icon-amber" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        </div>
+        <h3 id="promise-heading">Promise a Date</h3>
+      </div>
+      <span class="door-tag badge-amber">Pause Outreach</span>
+    </div>
     <p>Need more time to process? Commit to a specific remittance date. Automated dunning outreach will be paused until your promised date.</p>
     <div class="action-form">
       <div class="form-group">
         <label for="promised-date">When will you pay?</label>
         <input type="date" id="promised-date" min="{{ promise_min }}" max="{{ promise_max }}">
       </div>
-      <button id="promise" class="btn-secondary" style="min-height: 44px; font-weight: 600;">Submit Promise to Pay</button>
+      <button id="promise" class="btn-secondary btn-door-action btn-door-amber">
+        <span>Submit Promise to Pay</span>
+        <span class="btn-icon-pill" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </span>
+      </button>
     </div>
     <div id="promise-status" class="status" role="status" aria-live="polite"></div>
   </section>
 
   <!-- Door 3: Raise a Dispute -->
   <section class="action-card" id="door-dispute" aria-labelledby="dispute-heading">
-    <h3 id="dispute-heading">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--danger);"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-      Raise an Objection / Dispute
-    </h3>
+    <div class="door-header">
+      <div class="door-title-wrap">
+        <div class="door-icon door-icon-rose" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        </div>
+        <h3 id="dispute-heading">Raise an Objection / Dispute</h3>
+      </div>
+      <span class="door-tag badge-rose">MSMED Protected</span>
+    </div>
     <p>Rate discrepancy, damaged goods, or TDS withholding reconciliation? Lodge a structured objection to pause statutory interest and route to triage.</p>
     <div class="action-form">
       <div class="form-group">
-        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px;">
-          <label for="dispute-reason" style="margin: 0; font-size: 0.875rem; font-weight: 600; color: var(--text);">Reason for dispute</label>
-          <span id="char-counter" class="char-count" aria-live="polite" aria-atomic="true">0 / {{ dispute_reason_max }}</span>
+        <div class="form-label-row">
+          <label for="dispute-reason">Reason for dispute</label>
+          <span id="char-counter" class="char-count">0 / {{ dispute_reason_max }}</span>
         </div>
         <textarea id="dispute-reason" rows="3" maxlength="{{ dispute_reason_max }}" aria-describedby="char-counter" placeholder="E.g., 10% TDS deducted under Section 194C, short delivery on PO, pricing discrepancy..."></textarea>
       </div>
-      <button id="dispute" class="btn-secondary btn-dispute" style="min-height: 44px; font-weight: 600;">Submit Objection</button>
+      <button id="dispute" class="btn-secondary btn-dispute btn-door-action btn-door-rose">
+        <span>Submit Objection</span>
+        <span class="btn-icon-pill" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </span>
+      </button>
     </div>
     <div id="dispute-status" class="status" role="status" aria-live="polite"></div>
   </section>
 
   <footer class="compliance-note">
-    Actioning any of the above options will halt automated follow-up communications. Regulated under MSMED Act 2006 guidelines.
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+    <span>Actioning any of the above options halts automated follow-up communications. Regulated under MSMED Act 2006 guidelines.</span>
   </footer>
 </div>
 {% endblock %}
