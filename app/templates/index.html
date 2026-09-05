@@ -1,279 +1,480 @@
 {% extends "base.html" %}
 
-{% block title %}Recovery Agent | AI Buildathon{% endblock %}
+{% block title %}B2B Receivables Recovery Agent | Autonomous Indian Debt Recovery{% endblock %}
 
 {% block nav_home %}active{% endblock %}
 {% block wrap_class %}{% endblock %}
 
 {% block head %}
 <style>
-/* Page-specific styles using base variables */
-.hero {
+  /* --- Hero Section --- */
+  .hero {
     text-align: center;
-    padding: 60px 20px;
-    margin-bottom: 40px;
-}
-.hero h1 {
-    font-size: 2.5rem;
-    font-weight: 700;
-    margin: 20px 0 16px;
-    letter-spacing: -0.02em;
+    padding: 64px 20px 48px;
+    margin-bottom: 48px;
+    position: relative;
+  }
+  .hero-badge-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 24px;
+  }
+  .hero h1 {
+    font-size: clamp(2rem, 3.8vw, 2.75rem);
+    font-weight: 800;
+    margin: 0 auto 20px;
+    letter-spacing: -0.03em;
     color: var(--text);
-    line-height: 1.2;
-}
-.hero p {
-    font-size: 1.2rem;
+    line-height: 1.22;
+    max-width: 960px;
+  }
+  .hero p {
+    font-size: clamp(1.05rem, 1.8vw, 1.2rem);
     color: var(--muted);
-    max-width: 800px;
-    margin: 0 auto 30px;
+    max-width: 780px;
+    margin: 0 auto 32px;
     line-height: 1.6;
-}
-.differentiators {
+  }
+  .hero-actions {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 8px;
+  }
+  .hero-actions .btn {
+    min-height: 44px;
+    padding: 10px 22px;
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  /* --- Differentiators Grid --- */
+  .differentiators {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
     gap: 24px;
-    margin-bottom: 60px;
-}
-.diff-card {
+    margin-bottom: 64px;
+  }
+  .diff-card {
     display: flex;
     flex-direction: column;
-    padding: 24px;
-}
-.diff-icon {
-    font-size: 28px;
-    margin-bottom: 16px;
-    color: var(--accent);
-}
-.diff-title {
-    font-size: 1.1rem;
-    font-weight: 600;
-    margin-bottom: 12px;
-    color: var(--text);
-}
-.diff-text {
-    font-size: 0.95rem;
-    color: var(--muted);
-    line-height: 1.5;
-}
-.pipeline {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    margin-bottom: 60px;
-    overflow-x: auto;
-    padding-bottom: 20px;
-}
-.pipeline-step {
-    flex: 1;
-    min-width: 140px;
-    text-align: center;
-    position: relative;
-    padding: 0 10px;
-}
-.pipeline-step:not(:last-child)::after {
-    content: "\2192";
-    position: absolute;
-    right: -10px;
-    top: 20px;
-    color: var(--muted);
-    font-size: 20px;
-}
-.step-pill {
-    background: var(--surface);
+    padding: 28px 24px;
     border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 12px 16px;
-    font-weight: 500;
-    font-size: 0.9rem;
-    margin-bottom: 12px;
-    display: inline-block;
-    color: var(--text);
-}
-.step-desc {
-    font-size: 0.85rem;
-    color: var(--muted);
-    line-height: 1.4;
-}
-.section-title {
-    font-size: 1.5rem;
-    font-weight: 600;
-    margin-bottom: 24px;
-    color: var(--text);
-    border-bottom: 1px solid var(--border);
-    padding-bottom: 12px;
-}
-.quick-jump {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 16px;
-    margin-bottom: 60px;
-}
-.jump-card {
-    text-decoration: none;
-    padding: 20px;
-    transition: transform 0.2s, border-color 0.2s;
+    border-radius: var(--radius-lg);
     background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    display: block;
-}
-.jump-card:hover {
-    transform: translateY(-2px);
+    transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s ease, border-color 0.2s ease;
+  }
+  .diff-card:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-md);
     border-color: var(--accent);
-}
-.jump-title {
-    font-weight: 600;
-    color: var(--text);
-    margin-bottom: 8px;
+  }
+  .diff-icon-wrap {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
     display: flex;
     align-items: center;
-    gap: 8px;
-}
-.jump-desc {
-    font-size: 0.85rem;
+    justify-content: center;
+    margin-bottom: 20px;
+    background: var(--accent-light);
+    color: var(--accent);
+  }
+  .diff-icon-wrap.restraint {
+    background: rgba(34, 197, 94, 0.12);
+    color: var(--success);
+  }
+  .diff-icon-wrap.statute {
+    background: rgba(245, 158, 11, 0.12);
+    color: var(--warning);
+  }
+  .diff-icon-wrap.benchmark {
+    background: var(--accent-light);
+    color: var(--accent);
+  }
+  .diff-title {
+    font-size: 1.15rem;
+    font-weight: 700;
+    margin-bottom: 10px;
+    color: var(--text);
+    letter-spacing: -0.015em;
+  }
+  .diff-text {
+    font-size: 0.95rem;
+    color: var(--text-secondary);
+    line-height: 1.55;
+    margin: 0;
+  }
+
+  /* --- Section Headers --- */
+  .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-bottom: 24px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 14px;
+  }
+  .section-title {
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: -0.02em;
+    margin: 0;
+  }
+  .section-sub {
+    font-size: 0.875rem;
     color: var(--muted);
-}
-.invoice-table-wrapper {
+    margin: 0;
+  }
+
+  /* --- Pipeline / How It Works --- */
+  .pipeline {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 16px;
+    margin-bottom: 64px;
+  }
+  @media (max-width: 900px) {
+    .pipeline {
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+  }
+  .pipeline-step {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-lg);
+    padding: 20px 16px;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    transition: transform 0.15s ease, border-color 0.15s ease;
+  }
+  .pipeline-step:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+  }
+  .step-num {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+  .step-pill {
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: var(--text);
+    margin-bottom: 8px;
+    letter-spacing: -0.01em;
+  }
+  .step-desc {
+    font-size: 0.85rem;
+    color: var(--muted);
+    line-height: 1.45;
+    margin: 0;
+  }
+
+  /* --- Quick Jump Navigation --- */
+  .quick-jump {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 20px;
+    margin-bottom: 64px;
+  }
+  .jump-card {
+    text-decoration: none;
+    padding: 24px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+    min-height: 120px;
+  }
+  .jump-card:hover {
+    transform: translateY(-3px);
+    border-color: var(--accent);
+    box-shadow: var(--shadow-md);
+  }
+  .jump-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .jump-title {
+    font-weight: 700;
+    font-size: 1.05rem;
+    color: var(--text);
+    letter-spacing: -0.015em;
+  }
+  .jump-arrow {
+    color: var(--accent);
+    transition: transform 0.2s ease;
+  }
+  .jump-card:hover .jump-arrow {
+    transform: translateX(4px);
+  }
+  .jump-desc {
+    font-size: 0.875rem;
+    color: var(--muted);
+    line-height: 1.4;
+    margin: 0;
+  }
+
+  /* --- Demo Invoices Table --- */
+  .invoice-table-wrapper {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
     overflow-x: auto;
-}
-.invoice-table {
+    -webkit-overflow-scrolling: touch;
+    box-shadow: var(--shadow-sm);
+    margin-bottom: 40px;
+  }
+  .invoice-table {
     width: 100%;
     border-collapse: collapse;
     text-align: left;
-}
-.invoice-table th, .invoice-table td {
-    padding: 16px;
-    border-bottom: 1px solid var(--border);
-}
-.invoice-table th {
-    font-size: 0.85rem;
-    font-weight: 500;
+    font-size: 13.5px;
+  }
+  .invoice-table th {
+    padding: 14px 18px;
+    background: var(--bg);
+    border-bottom: 1.5px solid var(--border);
+    font-size: 11.5px;
+    font-weight: 700;
     color: var(--muted);
     text-transform: uppercase;
     letter-spacing: 0.05em;
-}
-.invoice-table tr:last-child td {
+    white-space: nowrap;
+  }
+  .invoice-table td {
+    padding: 16px 18px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+  }
+  .invoice-table tr:last-child td {
     border-bottom: none;
-}
-.invoice-table tbody tr {
-    transition: background-color 0.2s;
-}
-.invoice-table tbody tr:hover {
-    background-color: var(--bg);
-}
-.amount {
+  }
+  .invoice-table tbody tr {
+    transition: background-color 0.15s ease;
+  }
+  .invoice-table tbody tr:hover {
+    background-color: var(--border-subtle);
+  }
+  .amount {
     font-variant-numeric: tabular-nums;
-    font-weight: 500;
-}
-.btn-sm {
-    padding: 6px 12px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .btn-sm {
+    padding: 8px 16px;
+    min-height: 44px;
+    min-width: 44px;
     text-decoration: none;
     font-size: 0.85rem;
     border-radius: var(--radius);
-    display: inline-block;
-    text-align: center;
-}
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+  }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="hero">
-    <span class="badge-indigo">Razorpay AI Buildathon 2026 &middot; Track 03</span>
-    <h1>An AI agent for Indian B2B receivables that decides &mdash; per debtor, not per invoice &mdash; whether to wait, collect, negotiate, reconcile, or escalate.</h1>
-    <p>Measured recovery with a comprehensive audit trail. Built for the nuances of MSME guidelines and India-specific compliance.</p>
-</div>
+<section class="hero" aria-labelledby="hero-title">
+  <h1 id="hero-title">
+    An AI agent for Indian B2B receivables that decides &mdash; per debtor, not per invoice &mdash; whether to wait, collect, negotiate, reconcile, or escalate.
+  </h1>
+  <p>
+    Empirically measured recovery with a tamper-evident audit trail &middot; Built for Razorpay AI Buildathon 2026 (Track 03). Grounded in MSMED statutory timelines, Section 43B(h) tax disallowance, and Form 26AS TDS withholding compliance.
+  </p>
+  <div class="hero-actions">
+    <a href="/results" class="btn btn-primary">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+      Explore Benchmark Results
+    </a>
+    <a href="/operator" class="btn btn-secondary">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+      Operator Console
+    </a>
+    <a href="/r/{{ demo_token() }}" class="btn btn-secondary" target="_blank" rel="noopener noreferrer">
+      Live Debtor Portal ↗
+    </a>
+  </div>
+</section>
 
-<div class="differentiators">
+<!-- Architectural Differentiators -->
+<section aria-labelledby="differentiators-title">
+  <h2 id="differentiators-title" class="sr-only">Core Architecture Differentiators</h2>
+  <div class="differentiators">
     <div class="card diff-card">
-        <div class="diff-icon">&#9632;</div>
-        <div class="diff-title">Restraint</div>
-        <div class="diff-text">The agent knows when NOT to act. WAIT is treated as a first-class strategy. Intelligent suppression prevents unnecessary friction.</div>
+      <div class="diff-icon-wrap restraint" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><circle cx="12" cy="11" r="3"></circle></svg>
+      </div>
+      <div class="diff-title">Intelligent Restraint</div>
+      <div class="diff-text">The agent treats WAIT as a first-class strategy. Account-level historical payment reliability and active opt-outs trigger immediate suppression, preventing relationship damage.</div>
     </div>
     <div class="card diff-card">
-        <div class="diff-icon">&#9672;</div>
-        <div class="diff-title">India Correctness</div>
-        <div class="diff-text">TDS reconciliation, MSMED s.15/16, Section 43B(h), Udyam eligibility gate. The agent strictly avoids citing statutes when the merchant is ineligible.</div>
+      <div class="diff-icon-wrap statute" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+      </div>
+      <div class="diff-title">India Statutory Grounding</div>
+      <div class="diff-text">Form 26AS TDS reconciliation, Section 43B(h) non-adversarial tax cues, and MSMED Section 15/16 eligibility gates. The agent refuses statutory threats when merchants are ineligible traders.</div>
     </div>
     <div class="card diff-card">
-        <div class="diff-icon">&#9650;</div>
-        <div class="diff-title">Counterfactual</div>
-        <div class="diff-text">Evaluated against a baseline on an identical seed. Real, measured delta in recovery performance, not fabricated metrics.</div>
+      <div class="diff-icon-wrap benchmark" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+      </div>
+      <div class="diff-title">Counterfactual Evaluation</div>
+      <div class="diff-text">Head-to-head empirical evaluation against a rigid calendar dunning baseline across an identical seeded portfolio. Measured recovery delta, lower touch noise, and zero wrongful escalations.</div>
     </div>
-</div>
+  </div>
+</section>
 
-<h2 class="section-title">How It Works</h2>
-<div class="pipeline">
+<!-- Pipeline Workflow -->
+<section aria-labelledby="workflow-title">
+  <div class="section-header">
+    <div>
+      <h2 id="workflow-title" class="section-title">End-to-End Decision Architecture</h2>
+      <p class="section-sub">Autonomous five-stage execution lifecycle per commercial debtor account</p>
+    </div>
+  </div>
+  <div class="pipeline">
     <div class="pipeline-step">
-        <div class="step-pill">Seeded Ledger</div>
-        <div class="step-desc">Ingest raw invoices &amp; debtor history</div>
+      <div class="step-num">Stage 01</div>
+      <div class="step-pill">Seeded Ledger</div>
+      <div class="step-desc">Ingests multi-invoice debt, UTR records, and payment history per debtor.</div>
     </div>
     <div class="pipeline-step">
-        <div class="step-pill">Policy Envelope</div>
-        <div class="step-desc">Apply hard compliance constraints</div>
+      <div class="step-num">Stage 02</div>
+      <div class="step-pill">Policy Envelope</div>
+      <div class="step-desc">Deterministic rules bar unlawful citations, enforce opt-outs, and bound asks.</div>
     </div>
     <div class="pipeline-step">
-        <div class="step-pill">AI Strategist</div>
-        <div class="step-desc">Determine action per debtor</div>
+      <div class="step-num">Stage 03</div>
+      <div class="step-pill">AI Strategist</div>
+      <div class="step-desc">Gemini reasons across tenure and aging to select 1 of 7 calibrated actions.</div>
     </div>
     <div class="pipeline-step">
-        <div class="step-pill">Channel Dispatch</div>
-        <div class="step-desc">Execute communications</div>
+      <div class="step-num">Stage 04</div>
+      <div class="step-pill">Channel Dispatch</div>
+      <div class="step-desc">Dispatches polite bilingual notices via WhatsApp &amp; Email with Razorpay links.</div>
     </div>
     <div class="pipeline-step">
-        <div class="step-pill">Settlement Suppression</div>
-        <div class="step-desc">Pause active collection upon payment</div>
+      <div class="step-num">Stage 05</div>
+      <div class="step-pill">Settlement Suppression</div>
+      <div class="step-desc">Webhook instantly halts active recovery the moment payment lands on-rail.</div>
     </div>
-</div>
+  </div>
+</section>
 
-<h2 class="section-title">Quick Jump Navigation</h2>
-<div class="quick-jump">
+<!-- Quick Jump Navigation -->
+<section aria-labelledby="quick-jump-title">
+  <div class="section-header">
+    <div>
+      <h2 id="quick-jump-title" class="section-title">Application Surfaces</h2>
+      <p class="section-sub">Direct access to operator, benchmark, and debtor portals</p>
+    </div>
+  </div>
+  <div class="quick-jump">
     <a href="/results" class="jump-card">
-        <div class="jump-title">&#8594; Results &amp; Benchmark</div>
-        <div class="jump-desc">View the counterfactual analysis</div>
+      <div>
+        <div class="jump-header">
+          <div class="jump-title">Results &amp; Benchmark</div>
+          <svg class="jump-arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+        </div>
+        <div class="jump-desc">View the empirical counterfactual analysis across 70 invoices, 20 debtors, and 8 hard-case archetypes.</div>
+      </div>
     </a>
     <a href="/operator" class="jump-card">
-        <div class="jump-title">&#8594; Operator Console</div>
-        <div class="jump-desc">Monitor and manage agent activity</div>
+      <div>
+        <div class="jump-header">
+          <div class="jump-title">Operator Console</div>
+          <svg class="jump-arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+        </div>
+        <div class="jump-desc">Inspect high-stakes review queues, manage the master kill switch, and export append-only audit trails.</div>
+      </div>
     </a>
-    <a href="/r/{{ demo_token() }}" class="jump-card">
-        <div class="jump-title">&#8594; Live Resolution Demo</div>
-        <div class="jump-desc">Experience a debtor interaction</div>
+    <a href="/r/{{ demo_token() }}" class="jump-card" target="_blank" rel="noopener noreferrer">
+      <div>
+        <div class="jump-header">
+          <div class="jump-title">Live Resolution Portal ↗</div>
+          <svg class="jump-arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+        </div>
+        <div class="jump-desc">Experience the debtor-facing multi-door surface: Pay Now with Razorpay, Promise a Date, or Raise Dispute.</div>
+      </div>
     </a>
-</div>
+  </div>
+</section>
 
-<h2 class="section-title">Demo Invoices</h2>
-{% if invoices %}
-<div class="invoice-table-wrapper">
+<!-- Demo Invoices Table -->
+<section aria-labelledby="demo-invoices-title">
+  <div class="section-header">
+    <div>
+      <h2 id="demo-invoices-title" class="section-title">Curated Demo Invoices</h2>
+      <p class="section-sub">Live resolvable receivable items with verified live balances</p>
+    </div>
+  </div>
+
+  {% if invoices %}
+  <div class="invoice-table-wrapper" role="region" aria-label="Curated Demo Invoices Table" tabindex="0">
     <table class="invoice-table">
-        <thead>
-            <tr>
-                <th>Invoice ID</th>
-                <th>Debtor</th>
-                <th>Amount</th>
-                <th>Days Overdue</th>
-                <th>Status</th>
-                <th>Action</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for inv in invoices %}
-            <tr>
-                <td style="font-weight: 500; color: var(--text);">{{ inv.invoice_id }}</td>
-                <td>{{ inv.debtor }}</td>
-                <td class="amount">{{ inv.amount_display }}</td>
-                <td>{{ inv.days_overdue }}</td>
-                <td><span class="chip">{{ inv.status }}</span></td>
-                <td><a href="/r/{{ inv.token }}" class="btn-primary btn-sm">View</a></td>
-            </tr>
-            {% endfor %}
-        </tbody>
+      <thead>
+        <tr>
+          <th scope="col">Invoice ID</th>
+          <th scope="col">Debtor Account</th>
+          <th scope="col">Outstanding Balance</th>
+          <th scope="col">Aging</th>
+          <th scope="col">Status</th>
+          <th scope="col" style="text-align: right;">Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for inv in invoices %}
+        <tr>
+          <td style="font-weight: 600; color: var(--text);">
+            <span class="font-mono">{{ inv.invoice_id }}</span>
+          </td>
+          <td style="color: var(--text); font-weight: 500;">{{ inv.debtor }}</td>
+          <td class="amount">₹{{ inv.amount_display }}</td>
+          <td>
+            {% set days = inv.days_overdue|int %}
+            {% if days <= 15 %}
+              <span class="badge badge-emerald">{{ days }}d Overdue</span>
+            {% elif days <= 45 %}
+              <span class="badge badge-amber">{{ days }}d Overdue</span>
+            {% else %}
+              <span class="badge badge-rose">{{ days }}d Overdue</span>
+            {% endif %}
+          </td>
+          <td>
+            <span class="chip">{{ inv.status }}</span>
+          </td>
+          <td style="text-align: right;">
+            <a href="/r/{{ inv.token }}" class="btn-primary btn-sm" aria-label="Open debtor resolution page for invoice {{ inv.invoice_id }}" target="_blank" rel="noopener noreferrer">
+              Resolve ↗
+            </a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
     </table>
-</div>
-{% else %}
-<p style="color: var(--muted);">No demo invoices available at the moment.</p>
-{% endif %}
-
+  </div>
+  {% else %}
+  <div class="card" style="text-align: center; padding: 32px; color: var(--muted);">
+    <p style="margin: 0;">No active overdue demo invoices currently found in the live ledger.</p>
+  </div>
+  {% endif %}
+</section>
 {% endblock %}

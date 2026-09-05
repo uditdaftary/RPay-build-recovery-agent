@@ -1,164 +1,441 @@
 {% extends "base.html" %}
 
+{% block title %}Operator Console | Human-in-the-Loop &amp; Kill Switch{% endblock %}
+
 {% block nav_operator %}active{% endblock %}
 {% block nav_operator_key %}{% if operator_key %}?key={{ operator_key }}{% endif %}{% endblock %}
+
+{% block head %}
+<style>
+  .op-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-bottom: 28px;
+  }
+  .op-title {
+    font-size: 24px;
+    font-weight: 800;
+    color: var(--text);
+    margin: 0 0 4px 0;
+    letter-spacing: -0.025em;
+  }
+  .op-sub {
+    margin: 0;
+    color: var(--muted);
+    font-size: 13.5px;
+  }
+
+  /* Kill switch visual styling */
+  .kill-switch-card {
+    margin-bottom: 24px;
+    padding: 24px;
+    border-radius: var(--radius-lg);
+    border: 1.5px solid var(--border);
+    background: var(--surface);
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .kill-switch-card.halted {
+    border-color: rgba(239, 68, 68, 0.5);
+    background: rgba(239, 68, 68, 0.04);
+    box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.2), 0 4px 14px rgba(239, 68, 68, 0.08);
+  }
+  .kill-switch-card.running {
+    border-color: rgba(34, 197, 94, 0.4);
+    background: rgba(34, 197, 94, 0.03);
+    box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.15), var(--shadow-sm);
+  }
+  .kill-switch-layout {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  .kill-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 700;
+    font-size: 13px;
+  }
+  .pulse-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .pulse-dot.danger {
+    background: var(--danger);
+    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.3);
+    animation: pulse 1.5s infinite;
+  }
+  .pulse-dot.success {
+    background: var(--success);
+    box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.3);
+  }
+  @keyframes pulse {
+    0% { transform: scale(0.95); opacity: 0.8; }
+    50% { transform: scale(1.2); opacity: 1; }
+    100% { transform: scale(0.95); opacity: 0.8; }
+  }
+
+  /* Table styling */
+  .queue-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    border-radius: var(--radius);
+    margin-top: 14px;
+  }
+  .queue-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    text-align: left;
+  }
+  .queue-table th {
+    padding: 12px 14px;
+    background: var(--bg);
+    border-bottom: 1.5px solid var(--border);
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .queue-table td {
+    padding: 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+  }
+  .item-row {
+    transition: background-color 0.15s ease;
+  }
+  .item-row:hover {
+    background-color: var(--border-subtle);
+  }
+
+  /* Timeline in audit log */
+  .decision-timeline {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    border-left: 2px solid var(--border);
+    margin-left: 10px;
+    padding-left: 24px;
+    margin-top: 16px;
+  }
+  .timeline-node {
+    position: relative;
+  }
+  .timeline-marker {
+    position: absolute;
+    left: -30px;
+    top: 5px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 2px solid var(--surface);
+  }
+
+  /* Rejection Native Dialog */
+  .accessible-dialog {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    color: var(--text);
+    padding: 24px;
+    max-width: 480px;
+    width: 90%;
+    margin: auto;
+    box-shadow: var(--shadow-lg);
+  }
+  .accessible-dialog::backdrop {
+    background: rgba(15, 23, 42, 0.65);
+    backdrop-filter: blur(4px);
+  }
+  .accessible-dialog h3 {
+    font-size: 17px;
+    margin: 0 0 8px 0;
+    color: var(--text);
+  }
+
+  /* Toast Notification */
+  .toast-container {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: none;
+  }
+  .toast {
+    background: var(--surface-raised);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 12px 16px;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    font-size: 13px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    pointer-events: auto;
+    animation: toast-in 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    max-width: 420px;
+  }
+  .toast.success {
+    border-color: rgba(34, 197, 94, 0.4);
+    box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.2), var(--shadow-lg);
+  }
+  .toast.error {
+    border-color: rgba(239, 68, 68, 0.4);
+    box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.2), var(--shadow-lg);
+  }
+  @keyframes toast-in {
+    from { transform: translateY(12px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+</style>
+{% endblock %}
 
 {% block content %}
 <meta name="operator-key" content="{{ operator_key | default('') }}">
 
-<div class="header" style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px;">
+<!-- Operator Header -->
+<div class="op-header">
   <div>
-    <h1 style="margin: 0; font-size: 24px; color: var(--text);">Operator Console</h1>
-    <p style="margin: 4px 0 0 0; color: var(--muted); font-size: 14px;">
-      High-Stakes Decision Review Queue & Master Kill Switch
+    <h1 class="op-title">Operator Console</h1>
+    <p class="op-sub">
+      High-Stakes Decision Review Queue &amp; Master Kill Switch Safety Actuator
     </p>
   </div>
-  <div style="display: flex; gap: 8px;">
-    <a href="/api/operator/export?format=json{% if operator_key %}&key={{ operator_key }}{% endif %}" class="btn btn-secondary" download="audit_events.json" style="text-decoration: none;">Export JSON</a>
-    <a href="/api/operator/export?format=csv{% if operator_key %}&key={{ operator_key }}{% endif %}" class="btn btn-secondary" download="audit_events.csv" style="text-decoration: none;">Export CSV</a>
+  <div style="display: flex; gap: 8px; align-items: center;">
+    <a href="/api/operator/export?format=json{% if operator_key %}&key={{ operator_key }}{% endif %}" class="btn btn-secondary" download="audit_events.json" aria-label="Export audit events in JSON format">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+      Export JSON
+    </a>
+    <a href="/api/operator/export?format=csv{% if operator_key %}&key={{ operator_key }}{% endif %}" class="btn btn-secondary" download="audit_events.csv" aria-label="Export audit events in CSV format">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+      Export CSV
+    </a>
   </div>
 </div>
 
-<div class="card" style="margin-bottom: 24px;">
-  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-    <h2 style="margin: 0; font-size: 16px; color: var(--text);">Agent decision log</h2>
+<!-- Master Kill Switch Safety Card -->
+<section class="card kill-switch-card {% if kill_switch_active %}halted{% else %}running{% endif %}" aria-labelledby="kill-switch-heading">
+  <div class="kill-switch-layout">
+    <div>
+      <h2 id="kill-switch-heading" style="margin: 0 0 6px 0; font-size: 16px; color: var(--text);">
+        Master Agent Kill Switch
+      </h2>
+      <p style="margin: 0; font-size: 13.5px; color: var(--text-secondary);">
+        {% if kill_switch_active %}
+        <span class="kill-indicator" style="color: var(--danger);">
+          <span class="pulse-dot danger"></span>
+          ENGAGED (Halted)
+        </span>
+        &mdash; All automated and queued outbound agent communications are strictly halted across all instances.
+        {% else %}
+        <span class="kill-indicator" style="color: var(--success);">
+          <span class="pulse-dot success"></span>
+          ACTIVE (Normal Operation)
+        </span>
+        &mdash; Continuous recovery pipeline is operating normally. Click to immediately halt all agent dispatches.
+        {% endif %}
+      </p>
+    </div>
+    <div>
+      <button id="toggle-kill-switch" class="btn {% if kill_switch_active %}btn-secondary{% else %}btn-danger{% endif %}" style="min-height: 44px; padding: 10px 22px; font-weight: 700;">
+        {% if kill_switch_active %}
+          Deactivate Kill Switch (Resume Agents)
+        {% else %}
+          Activate Master Kill Switch (Halt Agents)
+        {% endif %}
+      </button>
+    </div>
+  </div>
+</section>
+
+<!-- Review Queue Section -->
+<section class="card" aria-labelledby="queue-heading">
+  {% set queue_total = queue_total | default(queue | length, true) %}
+  <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 8px; margin-bottom: 4px;">
+    <h2 id="queue-heading" style="margin: 0; font-size: 17px; color: var(--text);">
+      Review-first mode: pending human approvals ({{ queue_total }})
+    </h2>
+    <span class="badge badge-amber" style="font-size: 11px;">High-Stakes Gate</span>
+  </div>
+
+  {% if queue_total > queue | length %}
+  <p style="margin: 4px 0 16px 0; color: var(--muted); font-size: 12.5px;">
+    Displaying each debtor's oldest pending action ({{ queue | length }} of {{ queue_total }} total items). Approving or rejecting advances the debtor's FIFO queue. Full backlog accessible at <a href="/api/operator/queue{% if operator_key %}?key={{ operator_key }}{% endif %}">/api/operator/queue</a>.
+  </p>
+  {% else %}
+  <p style="margin: 4px 0 16px 0; color: var(--muted); font-size: 12.5px;">
+    All outbound actions requiring manual review before delivery are listed below.
+  </p>
+  {% endif %}
+
+  {% if queue %}
+  <div class="queue-table-wrap" role="region" aria-label="Pending Approvals Table" tabindex="0">
+    <table class="queue-table">
+      <thead>
+        <tr>
+          <th scope="col">Debtor Account</th>
+          <th scope="col">Strategy</th>
+          <th scope="col">Ask Amount</th>
+          <th scope="col">Channel &amp; Lang</th>
+          <th scope="col">Statutory Grounding</th>
+          <th scope="col" style="text-align: right;">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in queue %}
+        <tr id="row-{{ item.debtor_id }}-{{ loop.index }}" class="item-row row-{{ item.debtor_id }}">
+          <td>
+            <div style="font-weight: 700; color: var(--text);">{{ item.debtor_name }}</div>
+            <div class="font-mono text-muted text-xs">{{ item.debtor_id }}</div>
+          </td>
+          <td>
+            <span class="badge badge-amber">{{ item.strategy }}</span>
+          </td>
+          <td class="tabular-nums" style="font-weight: 600; color: var(--text);">
+            {{ item.ask_amount_display }}
+          </td>
+          <td style="color: var(--text-secondary); font-weight: 500;">
+            {{ item.channel | upper }} &middot; {{ item.language | upper }}
+          </td>
+          <td>
+            {% if item.is_statutory %}
+            <span class="badge badge-rose" style="font-size: 11px;">MSMED s.15/16 + 43B(h)</span>
+            {% else %}
+            <span class="badge badge-slate" style="font-size: 11px;">Commercial Notice</span>
+            {% endif %}
+          </td>
+          <td style="text-align: right; white-space: nowrap;">
+            <button class="btn-approve btn btn-primary" data-debtor-id="{{ item.debtor_id }}" style="padding: 8px 14px; font-size: 12px; min-height: 44px; min-width: 44px; margin-right: 4px;" aria-label="Approve and send action for {{ item.debtor_id }}">
+              Approve &amp; Send
+            </button>
+            <button class="btn-reject btn btn-secondary" data-debtor-id="{{ item.debtor_id }}" style="padding: 8px 14px; font-size: 12px; min-height: 44px; min-width: 44px;" aria-label="Reject action for {{ item.debtor_id }}">
+              Reject
+            </button>
+          </td>
+        </tr>
+        <tr id="details-{{ item.debtor_id }}-{{ loop.index }}" class="details-row details-{{ item.debtor_id }}" style="background: var(--bg);">
+          <td colspan="6" style="padding: 12px 18px;">
+            <details open style="font-size: 12.5px; border-top: none; margin-top: 0; padding-top: 0;">
+              <summary style="cursor: pointer; font-weight: 600; color: var(--text); margin-bottom: 8px;">
+                Drafted Message Preview &amp; Strategist Reasoning
+              </summary>
+              <div style="background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; margin-top: 6px;">
+                <div style="margin-bottom: 8px;">
+                  <strong style="color: var(--text);">Strategist Reasoning:</strong>
+                  <span style="color: var(--text-secondary);">{{ item.reasoning }}</span>
+                </div>
+                {% if item.subject %}
+                <div style="margin-bottom: 8px;">
+                  <strong style="color: var(--text);">Subject Line:</strong>
+                  <span class="font-mono" style="color: var(--text); font-size: 12px;">{{ item.subject }}</span>
+                </div>
+                {% endif %}
+                <div>
+                  <strong style="color: var(--text);">Drafted Body:</strong>
+                  <pre style="white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 11.5px; line-height: 1.5; background: var(--bg); padding: 12px; border-radius: var(--radius); margin: 6px 0 0 0; color: var(--text); border: 1px solid var(--border);">{{ item.body }}</pre>
+                </div>
+              </div>
+            </details>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div style="text-align: center; padding: 32px 16px; color: var(--muted); font-size: 13.5px;">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom: 8px; color: var(--success);"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+    <p style="margin: 0;">No high-stakes actions currently pending operator review. All queues clear.</p>
+  </div>
+  {% endif %}
+</section>
+
+<!-- Agent Decision Log (Audit Trail View) -->
+<section class="card" aria-labelledby="log-heading" style="margin-top: 24px;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+    <h2 id="log-heading" style="margin: 0; font-size: 17px; color: var(--text);">
+      Agent Decision Audit Trail
+    </h2>
     <span style="font-size: 12px; color: var(--muted);">
-      {{ decisions | length }} most recent <code>decision.made</code> rows from the append-only audit log
+      {{ decisions | length }} most recent <code>decision.made</code> events
     </span>
   </div>
 
   {% if decisions %}
-  <div style="display: flex; flex-direction: column; gap: 20px; border-left: 2px solid var(--border); margin-left: 8px; padding-left: 24px;">
+  <div class="decision-timeline">
     {% for d in decisions %}
-    <div style="position: relative;">
-      <div style="position: absolute; left: -31px; top: 5px; width: 10px; height: 10px; border-radius: 50%; background: {% if d.strategy == 'WAIT' %}var(--muted){% elif d.review_required %}var(--warning){% else %}var(--accent){% endif %}; border: 2px solid var(--surface);"></div>
-      <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 6px;">
+    <div class="timeline-node">
+      <div class="timeline-marker" style="background: {% if d.strategy == 'WAIT' %}var(--muted){% elif d.review_required %}var(--warning){% else %}var(--accent){% endif %};"></div>
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 6px; flex-wrap: wrap;">
         <div>
-          <strong style="color: var(--text);">{{ d.debtor_name or d.debtor_id }}</strong>
-          <span class="badge {% if d.strategy == 'WAIT' %}badge-slate{% elif d.review_required %}badge-amber{% else %}badge-indigo{% endif %}" style="margin-left: 8px;">{{ d.strategy }}</span>
+          <strong style="color: var(--text); font-size: 14px;">{{ d.debtor_name or d.debtor_id }}</strong>
+          <span class="badge {% if d.strategy == 'WAIT' %}badge-slate{% elif d.review_required %}badge-amber{% else %}badge-indigo{% endif %}" style="margin-left: 6px;">{{ d.strategy }}</span>
           <span class="badge badge-slate" style="margin-left: 4px;">{{ d.action_class }}</span>
         </div>
-        <span style="font-size: 11px; color: var(--muted); white-space: nowrap;" title="{{ d.ts }}">{{ d.ts[:16] | replace("T", " ") }} UTC</span>
+        <span class="tabular-nums" style="font-size: 11px; color: var(--muted); white-space: nowrap;" title="{{ d.ts }}">
+          {{ d.ts[:16] | replace("T", " ") }} UTC
+        </span>
       </div>
-      <div style="font-size: 13px; color: var(--text); margin-bottom: 6px;">{{ d.reasoning }}</div>
+      <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; line-height: 1.5;">
+        {{ d.reasoning }}
+      </div>
       {% for r in d.rejected_actions %}
-      <div style="font-size: 12px; color: var(--muted);">Rejected {{ r.strategy }}: {{ r.reason }}</div>
+      <div style="font-size: 11.5px; color: var(--muted);">
+        &bull; Rejected {{ r.strategy }}: {{ r.reason }}
+      </div>
       {% endfor %}
-      <div style="font-size: 12px; color: var(--muted); margin-top: 6px;">
-        Channel {{ d.channel | upper }} &middot; {{ d.language | upper }} &middot; {{ d.tone }}
-        {% if d.confidence is not none %}&middot; confidence {{ d.confidence }}{% endif %}
+      <div style="font-size: 11.5px; color: var(--muted); margin-top: 6px;">
+        Channel {{ d.channel | upper }} &middot; {{ d.language | upper }} &middot; Tone: {{ d.tone }}
+        {% if d.confidence is not none %}&middot; Confidence: {{ d.confidence }}{% endif %}
       </div>
     </div>
     {% endfor %}
   </div>
   {% else %}
-  <p style="margin: 0; color: var(--muted); font-size: 13px;">
-    No decisions in the audit log yet. Run <code>python run_experiment.py</code> or the pipeline to populate it.
+  <p style="margin: 0; color: var(--muted); font-size: 13px; padding: 12px 0;">
+    No decisions recorded in the audit log yet. Execute the evaluation benchmark or the recovery pipeline to populate.
     {% if audit_log_ephemeral %}
-    This deployment has no <code>DATABASE_URL</code>, so the log is scratch space that does not survive an invocation.
+    <em>(Current deployment has no DATABASE_URL; log is ephemeral).</em>
     {% endif %}
   </p>
   {% endif %}
-</div>
+</section>
 
-<div class="card" style="margin-bottom: 24px; border-left: 4px solid {% if kill_switch_active %}var(--danger){% else %}#10b981{% endif %}; transition: all 0.3s ease; {% if kill_switch_active %}box-shadow: 0 0 15px rgba(239, 68, 68, 0.2); border-color: var(--danger);{% endif %}">
-  <div style="display: flex; justify-content: space-between; align-items: center;">
-    <div>
-      <h3 style="margin: 0; font-size: 16px; color: var(--text);">Master Agent Kill Switch</h3>
-      <p style="margin: 4px 0 0 0; color: var(--muted); font-size: 13px;">
-        {% if kill_switch_active %}
-        <strong style="color: var(--danger);">ENGAGED (Halted)</strong> &mdash; All automated and queued outbound agent communications are actively blocked.
-        {% else %}
-        <strong style="color: #10b981;">ACTIVE (Running)</strong> &mdash; Pipeline is operating normally. Click below to immediately halt all agent actions.
-        {% endif %}
-      </p>
+<!-- Native Rejection Dialog -->
+<dialog id="rejection-dialog" class="accessible-dialog" closedby="any" aria-labelledby="reject-dialog-title">
+  <form id="rejection-form" method="dialog">
+    <h3 id="reject-dialog-title">Reject Queued Action</h3>
+    <p style="font-size: 13px; color: var(--muted); margin-bottom: 14px;">
+      Specify reason for rejecting this debtor action. This reason will be stamped immutably into the audit trail.
+    </p>
+    <div style="margin-bottom: 16px;">
+      <label for="reject-reason-input" style="font-size: 12.5px; font-weight: 600; margin-bottom: 6px; display: block;">Rejection Rationale</label>
+      <input type="text" id="reject-reason-input" value="Operator commercial override" required style="margin: 0;">
     </div>
-    <div>
-      <button id="toggle-kill-switch" class="btn {% if kill_switch_active %}btn-secondary{% else %}btn-danger{% endif %}" style="padding: 10px 20px; font-size: 13px; font-weight: 600;">
-        {% if kill_switch_active %}Deactivate Kill Switch (Resume Agents){% else %}Activate Master Kill Switch (Halt Agents){% endif %}
-      </button>
+    <div style="display: flex; justify-content: flex-end; gap: 8px;">
+      <button type="button" id="btn-cancel-reject" class="btn btn-secondary">Cancel</button>
+      <button type="submit" id="btn-confirm-reject" class="btn btn-danger">Confirm Rejection</button>
     </div>
-  </div>
-</div>
+  </form>
+</dialog>
 
-<div class="card">
-  {% set queue_total = queue_total | default(queue | length, true) %}
-  <h2 style="margin: 0 0 4px 0; font-size: 16px; color: var(--text);">Review-first mode: pending human approvals ({{ queue_total }})</h2>
-  {% if queue_total > queue | length %}
-  <p style="margin: 0 0 16px 0; color: var(--muted); font-size: 12px;">
-    Showing each debtor's oldest pending action ({{ queue | length }} of {{ queue_total }} items).
-    Approving or rejecting takes the next item for that debtor, so every debtor is actionable from
-    this list; the full queue is served by <a href="/api/operator/queue{% if operator_key %}?key={{ operator_key }}{% endif %}">/api/operator/queue</a>.
-  </p>
-  {% endif %}
-  {% if queue %}
-  <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
-    <thead>
-      <tr style="border-bottom: 2px solid var(--border); text-align: left; color: var(--muted);">
-        <th style="padding: 12px 8px;">Debtor</th>
-        <th style="padding: 12px 8px;">Strategy</th>
-        <th style="padding: 12px 8px;">Ask Amount</th>
-        <th style="padding: 12px 8px;">Channel</th>
-        <th style="padding: 12px 8px;">Statutory</th>
-        <th style="padding: 12px 8px; text-align: right;">Actions</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for item in queue %}
-      <tr style="border-bottom: 1px solid var(--border); transition: background 0.15s;" id="row-{{ item.debtor_id }}-{{ loop.index }}" class="item-row row-{{ item.debtor_id }}">
-        <td style="padding: 16px 8px;">
-          <strong style="color: var(--text);">{{ item.debtor_name }}</strong><br>
-          <span style="color: var(--muted); font-size: 11px;">{{ item.debtor_id }}</span>
-        </td>
-        <td style="padding: 16px 8px;">
-          <span class="badge badge-amber">{{ item.strategy }}</span>
-        </td>
-        <td style="padding: 16px 8px; color: var(--text);">{{ item.ask_amount_display }}</td>
-        <td style="padding: 16px 8px; color: var(--text);">{{ item.channel | upper }} ({{ item.language | upper }})</td>
-        <td style="padding: 16px 8px;">
-          {% if item.is_statutory %}
-          <span style="color: var(--danger); font-weight: 600;">MSMED s.15/16 + 43B(h)</span>
-          {% else %}
-          <span style="color: var(--muted);">Commercial</span>
-          {% endif %}
-        </td>
-        <td style="padding: 16px 8px; text-align: right;">
-          <button class="btn-approve btn btn-primary" data-debtor-id="{{ item.debtor_id }}" style="padding: 6px 12px; font-size: 12px; margin-right: 4px;">Approve &amp; Send</button>
-          <button class="btn-reject btn btn-secondary" data-debtor-id="{{ item.debtor_id }}" style="padding: 6px 12px; font-size: 12px;">Reject</button>
-        </td>
-      </tr>
-      <tr id="details-{{ item.debtor_id }}-{{ loop.index }}" class="details-row details-{{ item.debtor_id }}" style="background: var(--bg); border-bottom: 2px solid var(--border);">
-        <td colspan="6" style="padding: 12px 16px;">
-          <details open style="font-size: 12px;">
-            <summary style="cursor: pointer; font-weight: 600; color: var(--text); margin-bottom: 8px;">
-              Message Preview &amp; Strategist Reasoning
-            </summary>
-            <div style="background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin-top: 6px;">
-              <div style="margin-bottom: 8px;">
-                <strong style="color: var(--text);">Reasoning:</strong>
-                <span style="color: var(--muted);">{{ item.reasoning }}</span>
-              </div>
-              {% if item.subject %}
-              <div style="margin-bottom: 8px;">
-                <strong style="color: var(--text);">Subject:</strong>
-                <span style="color: var(--text); font-family: monospace;">{{ item.subject }}</span>
-              </div>
-              {% endif %}
-              <div>
-                <strong style="color: var(--text);">Draft Body:</strong>
-                <pre style="white-space: pre-wrap; font-family: monospace; font-size: 11px; background: var(--bg); padding: 8px; border-radius: var(--radius); margin: 4px 0 0 0; color: var(--text); border: 1px solid var(--border);">{{ item.body }}</pre>
-              </div>
-            </div>
-          </details>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% else %}
-  <p style="margin: 0; color: var(--muted); font-size: 13px; padding: 16px 0;">No high-stakes actions pending operator review. All clear.</p>
-  {% endif %}
-</div>
+<!-- Toast Container -->
+<div id="toast-container" class="toast-container" aria-live="polite"></div>
 
 <script>
   let killSwitchState = {{ 'true' if kill_switch_active else 'false' }};
@@ -168,8 +445,57 @@
     ...(operatorKey ? { "X-Operator-Key": operatorKey } : {})
   };
 
+  function showToast(message, type = "success") {
+    const container = document.getElementById("toast-container");
+    while (container.children.length >= 3) {
+      container.firstChild.remove();
+    }
+    const toast = document.createElement("div");
+    toast.className = "toast " + type;
+    toast.setAttribute("role", "status");
+
+    const iconSvg = type === "success"
+      ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>'
+      : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>';
+
+    const contentWrap = document.createElement("div");
+    contentWrap.style.display = "flex";
+    contentWrap.style.alignItems = "center";
+    contentWrap.style.gap = "10px";
+    contentWrap.innerHTML = iconSvg + "<span>" + message + "</span>";
+
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.setAttribute("aria-label", "Dismiss notification");
+    closeBtn.style.background = "none";
+    closeBtn.style.border = "none";
+    closeBtn.style.padding = "4px";
+    closeBtn.style.cursor = "pointer";
+    closeBtn.style.color = "var(--muted)";
+    closeBtn.style.display = "inline-flex";
+    closeBtn.style.alignItems = "center";
+    closeBtn.style.minHeight = "24px";
+    closeBtn.style.minWidth = "24px";
+    closeBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+    closeBtn.onclick = () => toast.remove();
+
+    toast.appendChild(contentWrap);
+    toast.appendChild(closeBtn);
+    container.appendChild(toast);
+
+    setTimeout(() => {
+      toast.style.opacity = "0";
+      toast.style.transition = "opacity 0.3s ease";
+      setTimeout(() => toast.remove(), 300);
+    }, 4000);
+  }
+
+  // Master Kill Switch
   document.getElementById("toggle-kill-switch").addEventListener("click", async () => {
     const newState = !killSwitchState;
+    const btn = document.getElementById("toggle-kill-switch");
+    btn.disabled = true;
+    btn.textContent = "Updating status...";
     try {
       const res = await fetch("/api/operator/kill-switch", {
         method: "POST",
@@ -180,14 +506,18 @@
         window.location.reload();
       } else {
         const errData = await res.json().catch(() => ({}));
-        alert("Failed to toggle kill switch: " + (errData.detail || errData.error || res.statusText));
+        showToast("Failed to toggle kill switch: " + (errData.detail || errData.error || res.statusText), "error");
+        btn.disabled = false;
       }
     } catch (err) {
-      alert("Error toggling kill switch: " + err);
+      showToast("Network error toggling kill switch: " + err, "error");
+      btn.disabled = false;
     }
   });
 
+  // Approval handler
   async function approveItem(debtorId, btn) {
+    if (btn) btn.disabled = true;
     try {
       const res = await fetch("/api/operator/approve", {
         method: "POST",
@@ -196,80 +526,137 @@
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        alert("Could not approve: " + (errData.detail || errData.error || res.statusText));
+        showToast("Could not approve: " + (errData.detail || errData.error || res.statusText), "error");
+        if (btn) btn.disabled = false;
         return;
       }
       const data = await res.json();
       if (data.approved) {
-        if (btn) {
-          const row = btn.closest("tr");
-          const nextRow = row ? row.nextElementSibling : null;
+        const row = btn ? btn.closest("tr.item-row") : document.querySelector(".row-" + debtorId);
+        if (row) {
+          const nextRow = row.nextElementSibling;
           if (nextRow && nextRow.classList.contains("details-row")) nextRow.remove();
-          if (row) row.remove();
-        } else {
-          const row = document.querySelector(".row-" + debtorId);
-          if (row) {
-            const nextRow = row.nextElementSibling;
-            if (nextRow && nextRow.classList.contains("details-row")) nextRow.remove();
-            row.remove();
-          }
+          row.remove();
         }
-        alert("Approved & dispatched for " + debtorId);
+        showToast("Action approved & dispatched for " + debtorId, "success");
       } else {
-        alert("Could not approve: " + (data.error || "unknown error"));
+        showToast("Approval failed: " + (data.error || "unknown error"), "error");
+        if (btn) btn.disabled = false;
       }
     } catch (err) {
-      alert("Approval failed: " + err);
+      showToast("Approval error: " + err, "error");
+      if (btn) btn.disabled = false;
     }
   }
 
-  async function rejectItem(debtorId, btn) {
-    const reason = prompt("Enter rejection reason for audit log:", "Operator commercial override");
-    if (!reason) return;
+  // Native Dialog Rejection Flow (modern-web-guidance)
+  const rejectDialog = document.getElementById("rejection-dialog");
+  const rejectReasonInput = document.getElementById("reject-reason-input");
+  const btnConfirmReject = document.getElementById("btn-confirm-reject");
+  let activeRejectDebtorId = null;
+  let activeRejectRow = null;
+
+  function openRejectDialog(debtorId, btn) {
+    activeRejectDebtorId = debtorId;
+    activeRejectRow = btn ? btn.closest("tr.item-row") : null;
+    rejectReasonInput.value = "Operator commercial override";
+    if (typeof rejectDialog.showModal === "function") {
+      rejectDialog.showModal();
+    } else {
+      rejectDialog.setAttribute("open", "");
+    }
+  }
+
+  function closeRejectDialog() {
+    if (typeof rejectDialog.close === "function") {
+      rejectDialog.close();
+    } else {
+      rejectDialog.removeAttribute("open");
+    }
+    activeRejectDebtorId = null;
+    activeRejectRow = null;
+  }
+
+  document.getElementById("btn-cancel-reject").addEventListener("click", closeRejectDialog);
+  rejectDialog.addEventListener("cancel", () => {
+    activeRejectDebtorId = null;
+    activeRejectRow = null;
+  });
+  rejectDialog.addEventListener("close", () => {
+    activeRejectDebtorId = null;
+    activeRejectRow = null;
+  });
+
+  // modern-web-guidance light-dismiss fallback for browsers without closedby support
+  if (!('closedBy' in HTMLDialogElement.prototype)) {
+    rejectDialog.addEventListener('click', (event) => {
+      if (event.target !== rejectDialog) return;
+      const rect = rejectDialog.getBoundingClientRect();
+      const isContent = (
+        rect.top <= event.clientY &&
+        event.clientY <= rect.top + rect.height &&
+        rect.left <= event.clientX &&
+        event.clientX <= rect.left + rect.width
+      );
+      if (!isContent) closeRejectDialog();
+    });
+  }
+
+  document.getElementById("rejection-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const reason = rejectReasonInput.value.trim() || "Operator commercial override";
+    const debtorId = activeRejectDebtorId;
+    const targetRow = activeRejectRow;
+    
+    if (!debtorId) {
+      closeRejectDialog();
+      return;
+    }
+
+    btnConfirmReject.disabled = true;
+    btnConfirmReject.textContent = "Rejecting...";
+
     try {
       const res = await fetch("/api/operator/reject", {
         method: "POST",
         headers: authHeaders,
         body: JSON.stringify({ debtor_id: debtorId, reason: reason }),
       });
+      closeRejectDialog();
+
       if (res.ok) {
-        if (btn) {
-          const row = btn.closest("tr");
-          const nextRow = row ? row.nextElementSibling : null;
+        const row = targetRow || document.querySelector(".row-" + debtorId);
+        if (row) {
+          const nextRow = row.nextElementSibling;
           if (nextRow && nextRow.classList.contains("details-row")) nextRow.remove();
-          if (row) row.remove();
-        } else {
-          const row = document.querySelector(".row-" + debtorId);
-          if (row) {
-            const nextRow = row.nextElementSibling;
-            if (nextRow && nextRow.classList.contains("details-row")) nextRow.remove();
-            row.remove();
-          }
+          row.remove();
         }
+        showToast("Action rejected with reason: " + reason, "success");
       } else {
         const errData = await res.json().catch(() => ({}));
-        alert("Rejection failed: " + (errData.detail || errData.error || res.statusText));
+        showToast("Rejection failed: " + (errData.detail || errData.error || res.statusText), "error");
       }
     } catch (err) {
-      alert("Rejection failed: " + err);
+      closeRejectDialog();
+      showToast("Rejection error: " + err, "error");
+    } finally {
+      btnConfirmReject.disabled = false;
+      btnConfirmReject.textContent = "Confirm Rejection";
     }
-  }
+  });
 
+  // Attach button listeners
   document.querySelectorAll(".btn-approve").forEach((btn) => {
     btn.addEventListener("click", () => {
       const debtorId = btn.getAttribute("data-debtor-id");
-      if (debtorId) {
-        approveItem(debtorId, btn);
-      }
+      if (debtorId) approveItem(debtorId, btn);
     });
   });
 
   document.querySelectorAll(".btn-reject").forEach((btn) => {
     btn.addEventListener("click", () => {
       const debtorId = btn.getAttribute("data-debtor-id");
-      if (debtorId) {
-        rejectItem(debtorId, btn);
-      }
+      if (debtorId) openRejectDialog(debtorId, btn);
     });
   });
 </script>

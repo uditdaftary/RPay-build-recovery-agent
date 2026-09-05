@@ -14,45 +14,46 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    padding: 16px 20px;
+    padding: 18px 22px;
     position: relative;
     box-shadow: var(--shadow-sm);
-    transition: box-shadow 0.2s, transform 0.2s;
+    transition: box-shadow 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
   }
   .stat-card:hover {
     box-shadow: var(--shadow-md);
-    transform: translateY(-1px);
+    transform: translateY(-2px);
+    border-color: var(--muted);
   }
   .stat-card-title {
     font-size: 11px;
-    font-weight: 600;
+    font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: var(--muted);
-    margin-bottom: 6px;
+    margin-bottom: 8px;
     display: flex;
     justify-content: space-between;
     align-items: center;
   }
   .stat-card-val {
-    font-size: 24px;
-    font-weight: 700;
+    font-size: 26px;
+    font-weight: 800;
     color: var(--text);
-    letter-spacing: -0.02em;
+    letter-spacing: -0.025em;
     line-height: 1.2;
-    font-feature-settings: 'tnum' 1;
+    font-variant-numeric: tabular-nums;
   }
   .stat-card-sub {
-    font-size: 12px;
-    color: var(--muted);
-    margin-top: 6px;
-    line-height: 1.45;
+    font-size: 12.5px;
+    color: var(--text-secondary);
+    margin-top: 8px;
+    line-height: 1.5;
   }
 
   .strat-bar-wrap {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 14px;
     margin-bottom: 12px;
     font-size: 13px;
   }
@@ -66,44 +67,45 @@
     flex-grow: 1;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 5px;
   }
   .bar-row {
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-size: 11px;
+    gap: 10px;
+    font-size: 11.5px;
   }
   .bar-label {
-    width: 54px;
+    width: 56px;
     color: var(--muted);
-    font-weight: 500;
+    font-weight: 600;
     flex-shrink: 0;
   }
   .bar-track {
     flex-grow: 1;
     background: var(--border-subtle);
-    height: 14px;
-    border-radius: 4px;
+    height: 16px;
+    border-radius: var(--radius-full);
     overflow: hidden;
     position: relative;
   }
   .bar-fill-agent {
-    background: var(--accent);
+    background: linear-gradient(90deg, var(--accent) 0%, var(--accent-hover) 100%);
     height: 100%;
-    border-radius: 4px;
-    transition: width 0.6s cubic-bezier(0.4,0,0.2,1);
+    border-radius: var(--radius-full);
+    transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
   }
   .bar-fill-baseline {
-    background: var(--danger);
+    background: linear-gradient(90deg, var(--danger) 0%, #b91c1c 100%);
     height: 100%;
-    border-radius: 4px;
-    transition: width 0.6s cubic-bezier(0.4,0,0.2,1);
+    border-radius: var(--radius-full);
+    transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
   }
   .bar-val {
-    width: 60px;
-    font-weight: 600;
+    width: 65px;
+    font-weight: 700;
     color: var(--text);
+    font-variant-numeric: tabular-nums;
   }
 
   .matrix-table {
@@ -114,25 +116,30 @@
   }
   .matrix-table th {
     background: var(--bg);
-    padding: 12px 14px;
+    padding: 14px 16px;
     border-bottom: 2px solid var(--border);
     color: var(--muted);
-    font-weight: 600;
+    font-weight: 700;
     font-size: 11px;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
   }
   .matrix-table td {
-    padding: 12px 14px;
+    padding: 14px 16px;
     border-bottom: 1px solid var(--border);
     vertical-align: top;
   }
   .matrix-row-main {
     cursor: pointer;
-    transition: background 0.15s;
+    transition: background-color 0.15s ease;
   }
   .matrix-row-main:hover {
-    background: var(--border-subtle);
+    background-color: var(--border-subtle);
+  }
+  .matrix-row-main:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
   .matrix-row-details {
     background: var(--bg);
@@ -145,8 +152,8 @@
   .details-box {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 16px;
-    padding: 16px 20px;
+    gap: 18px;
+    padding: 18px 20px;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
@@ -156,55 +163,128 @@
     .details-box { grid-template-columns: 1fr; }
   }
 
-  .modal-overlay {
-    display: none;
-    position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
+  /* Theme-aware callouts for details box */
+  .callout-erred {
+    padding: 12px 16px;
+    background: var(--danger-light);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: var(--radius);
+  }
+  .callout-erred strong {
+    color: var(--danger);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .callout-erred p {
+    margin: 4px 0 0 0;
+    color: var(--text);
+    font-size: 12.5px;
+    line-height: 1.45;
+  }
+
+  .callout-won {
+    padding: 12px 16px;
+    background: var(--success-light);
+    border: 1px solid rgba(34, 197, 94, 0.3);
+    border-radius: var(--radius);
+    margin-bottom: 12px;
+  }
+  .callout-won strong {
+    color: var(--success);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .callout-won p {
+    margin: 4px 0 0 0;
+    color: var(--text);
+    font-size: 12.5px;
+    line-height: 1.45;
+  }
+
+  .draft-box {
+    padding: 12px 16px;
+    background: var(--accent-light);
+    border: 1px solid rgba(99, 102, 241, 0.25);
+    border-radius: var(--radius);
+  }
+
+  /* Native Accessible Modal Dialog (modern-web-guidance) */
+  dialog.modal-dialog {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    color: var(--text);
+    max-width: 680px;
+    width: 92%;
+    max-height: 90vh;
+    padding: 0;
+    margin: auto;
+    overflow: hidden;
+    box-shadow: var(--shadow-lg);
+  }
+  dialog.modal-dialog::backdrop {
     background: rgba(15, 23, 42, 0.65);
     backdrop-filter: blur(4px);
-    z-index: 1000;
-    align-items: center;
-    justify-content: center;
-    padding: 20px;
+    -webkit-backdrop-filter: blur(4px);
   }
-  .modal-overlay.active {
+  .modal-inner {
     display: flex;
-  }
-  .modal-card {
-    background: var(--surface);
-    border-radius: var(--radius-lg);
-    max-width: 680px;
-    width: 100%;
+    flex-direction: column;
     max-height: 90vh;
+  }
+  .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 18px 24px;
+    border-bottom: 1px solid var(--border);
+  }
+  .modal-body-scroll {
+    padding: 24px;
     overflow-y: auto;
-    box-shadow: 0 20px 25px -5px rgba(0,0,0,0.15), 0 8px 10px -6px rgba(0,0,0,0.1);
+    -webkit-overflow-scrolling: touch;
+  }
+  .pre-draft-body {
+    white-space: pre-wrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.55;
+    background: #09090b;
+    color: #f4f4f5;
+    padding: 16px;
+    border-radius: var(--radius);
+    margin: 0;
+    max-height: 320px;
+    overflow-y: auto;
     border: 1px solid var(--border);
   }
 </style>
 {% endblock %}
-{% block content %}
 
+{% block content %}
 <!-- Header & Title -->
-<div style="margin-bottom: 20px;">
-  <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px;">
+<header style="margin-bottom: 24px;">
+  <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 14px;">
     <div>
-      <h1 style="font-size: 22px; margin: 0 0 4px 0;">
+      <h1 style="font-size: 24px; margin: 0 0 6px 0;">
         Evaluation Benchmark &amp; Counterfactual Analysis
       </h1>
-      <p style="margin: 0; color: var(--muted); font-size: 13px;">
+      <p style="margin: 0; color: var(--muted); font-size: 13.5px;">
         Head-to-head empirical evaluation of AI Recovery Strategist vs Static Calendar Baseline Policy across 70 invoices &amp; 20 debtors.
       </p>
     </div>
-    <div style="display: flex; gap: 8px; align-items: center;">
+    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
       <span class="chip" style="font-size: 12px;">RNG Seed: <strong>{{ seed }}</strong></span>
       <span class="chip" style="font-size: 12px;">As-Of: <strong>{{ as_of }}</strong></span>
       <span class="badge badge-emerald" style="font-size: 12px;">{% if live_llm %}Live LLM (Gemini){% else %}Deterministic Evaluator (Mock){% endif %}</span>
     </div>
   </div>
-</div>
+</header>
 
 <!-- Section 4: Live Execution Controls -->
-<div class="card" style="margin-bottom: 24px;">
+<section class="card" aria-label="Evaluation Parameters" style="margin-bottom: 24px;">
   <form id="eval-form" method="GET" action="/results" style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end;">
     <div style="flex: 1; min-width: 140px;">
       <label for="input-seed">Ledger Seed</label>
@@ -214,28 +294,31 @@
       <label for="input-as-of">As-Of Date</label>
       <input type="date" id="input-as-of" name="as_of" value="{{ as_of }}" style="margin: 0;">
     </div>
-    <div style="display: flex; align-items: center; gap: 8px; padding-bottom: 6px;">
-      <input type="checkbox" id="input-live-llm" name="live_llm" value="true" {% if live_llm %}checked{% endif %} style="width: auto; margin: 0; cursor: pointer;">
-      <label for="input-live-llm" style="margin: 0; cursor: pointer; user-select: none;">
+    <div style="display: flex; align-items: center; gap: 8px; padding-bottom: 8px;">
+      <input type="checkbox" id="input-live-llm" name="live_llm" value="true" {% if live_llm %}checked{% endif %} style="width: 18px; height: 18px; min-height: 18px; margin: 0; cursor: pointer;">
+      <label for="input-live-llm" style="margin: 0; cursor: pointer; user-select: none; font-size: 13px;">
         Live LLM Chain (Gemini API)
       </label>
     </div>
     <div style="display: flex; gap: 8px;">
-      <button type="submit" id="btn-submit-eval" class="btn-primary" style="padding: 8px 18px;">
+      <button type="submit" id="btn-submit-eval" class="btn-primary" style="padding: 10px 20px; font-weight: 600;">
         Re-run Evaluation
       </button>
-      <a href="/results?seed=42&as_of=2026-08-26" class="btn" style="padding: 8px 14px;">
+      <a href="/results?seed=42&as_of=2026-08-26" class="btn" style="padding: 10px 16px;">
         Reset (Seed 42)
       </a>
     </div>
   </form>
-</div>
+</section>
 
 <!-- Section 1: Portfolio Overview & Headline Delta Cards -->
-<div style="margin-bottom: 24px;">
-  <h2 style="font-size: 15px; margin-bottom: 12px;">
-    Portfolio Overview &amp; Headline Benchmark Metrics
-  </h2>
+<section aria-labelledby="portfolio-heading" style="margin-bottom: 24px;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+    <h2 id="portfolio-heading" style="font-size: 16px; margin: 0;">
+      Portfolio Overview &amp; Headline Benchmark Metrics
+    </h2>
+    <span class="badge-pill badge-indigo">Empirically Grounded</span>
+  </div>
   
   <div class="card-grid">
     <!-- Card 1: Total Book Value -->
@@ -251,24 +334,24 @@
     </div>
 
     <!-- Card 2: Naive vs Collectible Balance -->
-    <div class="stat-card" style="border-left: 4px solid #4f46e5;">
+    <div class="stat-card">
       <div class="stat-card-title">
         <span>True Collectible Balance</span>
         <span class="badge-pill badge-indigo">Net of Deductions</span>
       </div>
-      <div class="stat-card-val" style="color: var(--accent);">{{ portfolio.total_collectible_inr }}</div>
+      <div class="stat-card-val text-accent">{{ portfolio.total_collectible_inr }}</div>
       <div class="stat-card-sub">
         vs {{ portfolio.total_naive_outstanding_inr }} Naive Outstanding (Prevents ₹1.46L wrongful TDS dunning)
       </div>
     </div>
 
     <!-- Card 3: WAIT Restraint Share -->
-    <div class="stat-card" style="border-left: 4px solid #16a34a;">
+    <div class="stat-card">
       <div class="stat-card-title">
         <span>WAIT Restraint Share</span>
         <span class="badge-pill badge-emerald">Noise Reduction</span>
       </div>
-      <div class="stat-card-val" style="color: var(--success);">
+      <div class="stat-card-val text-success">
         {{ comparative_metrics.agent_wait_restraint_pct }}%
         <span style="font-size: 14px; font-weight: 500; color: var(--muted);">vs {{ comparative_metrics.baseline_wait_restraint_pct }}% Base</span>
       </div>
@@ -278,12 +361,12 @@
     </div>
 
     <!-- Card 4: Reconciliation Routing -->
-    <div class="stat-card" style="border-left: 4px solid #0891b2;">
+    <div class="stat-card">
       <div class="stat-card-title">
         <span>Reconciliation Routing</span>
         <span class="badge-pill badge-cyan">Tax &amp; Bank UTR</span>
       </div>
-      <div class="stat-card-val" style="color: #0e7490;">
+      <div class="stat-card-val" style="color: #0284c7;">
         {{ comparative_metrics.reconcile_routing_pct }}%
       </div>
       <div class="stat-card-sub">
@@ -292,12 +375,12 @@
     </div>
 
     <!-- Card 5: Prevented Escalations -->
-    <div class="stat-card" style="border-left: 4px solid #e11d48;">
+    <div class="stat-card">
       <div class="stat-card-title">
         <span>Prevented Escalations</span>
         <span class="badge-pill badge-rose">Relationship Protection</span>
       </div>
-      <div class="stat-card-val" style="color: #be123c;">
+      <div class="stat-card-val text-danger">
         {{ comparative_metrics.prevented_escalations_count }}/{{ comparative_metrics.total_evaluated_debtors }}
       </div>
       <div class="stat-card-sub">
@@ -313,27 +396,27 @@
       </div>
       <div class="stat-card-val">
         {{ comparative_metrics.agent_touches_per_lakh }}
-        <span style="font-size: 13px; font-weight: 500; color: #64748b;">touches/Lakh</span>
+        <span style="font-size: 13px; font-weight: 500; color: var(--muted);">touches/Lakh</span>
       </div>
       <div class="stat-card-sub">
         Agent {{ comparative_metrics.agent_touches }} touches vs Baseline {{ comparative_metrics.baseline_touches }} touches ({{ comparative_metrics.baseline_touches_per_lakh }}/Lakh)
       </div>
     </div>
   </div>
-</div>
+</section>
 
 <!-- Section 2: Visual Strategy Distribution -->
-<div class="card" style="margin-bottom: 24px; padding: 20px 24px;">
-  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+<section class="card" aria-labelledby="strat-dist-heading" style="margin-bottom: 24px; padding: 24px;">
+  <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 20px;">
     <div>
-      <h2 style="font-size: 15px; margin: 0 0 2px 0;">
+      <h2 id="strat-dist-heading" style="font-size: 16px; margin: 0 0 4px 0;">
         Visual Strategy Distribution: AI Agent vs Calendar Baseline
       </h2>
-      <p style="margin: 0; color: var(--muted); font-size: 12px;">
+      <p style="margin: 0; color: var(--muted); font-size: 12.5px;">
         Action breakdown demonstrating dynamic multi-door routing vs single-track calendar escalation
       </p>
     </div>
-    <div style="display: flex; gap: 12px; font-size: 12px;">
+    <div style="display: flex; gap: 16px; font-size: 12.5px;">
       <div style="display: flex; align-items: center; gap: 6px;">
         <span style="width: 12px; height: 12px; background: var(--accent); border-radius: 3px; display: inline-block;"></span>
         <span style="font-weight: 600; color: var(--text-secondary);">AI Recovery Agent</span>
@@ -348,7 +431,7 @@
   {% set all_strategies = ['WAIT', 'RECONCILE', 'REQUEST_PAYMENT', 'OBTAIN_PROMISE', 'RESOLVE_DISPUTE', 'ESCALATE', 'HUMAN_HANDOFF'] %}
   {% set total_evaluated = comparative_metrics.total_evaluated_debtors | default(20) %}
 
-  <div style="display: flex; flex-direction: column; gap: 12px;">
+  <div style="display: flex; flex-direction: column; gap: 14px;">
     {% for strat in all_strategies %}
       {% set agent_count = strategy_distribution.agent.get(strat, 0) %}
       {% set baseline_count = strategy_distribution.baseline.get(strat, 0) %}
@@ -380,52 +463,52 @@
           <!-- Agent Bar -->
           <div class="bar-row">
             <span class="bar-label">Agent</span>
-            <div class="bar-track">
+            <div class="bar-track" aria-label="Agent {{ strat }}: {{ agent_count }} accounts">
               <div class="bar-fill-agent" style="width: {{ agent_pct }}%;"></div>
             </div>
-            <span class="bar-val">{{ agent_count }} <span style="font-weight: normal; color: #64748b; font-size: 10px;">({{ agent_pct }}%)</span></span>
+            <span class="bar-val">{{ agent_count }} <span style="font-weight: normal; color: var(--muted); font-size: 10.5px;">({{ agent_pct }}%)</span></span>
           </div>
 
           <!-- Baseline Bar -->
           <div class="bar-row">
             <span class="bar-label">Baseline</span>
-            <div class="bar-track">
+            <div class="bar-track" aria-label="Baseline {{ strat }}: {{ baseline_count }} accounts">
               <div class="bar-fill-baseline" style="width: {{ baseline_pct }}%;"></div>
             </div>
-            <span class="bar-val">{{ baseline_count }} <span style="font-weight: normal; color: #64748b; font-size: 10px;">({{ baseline_pct }}%)</span></span>
+            <span class="bar-val">{{ baseline_count }} <span style="font-weight: normal; color: var(--muted); font-size: 10.5px;">({{ baseline_pct }}%)</span></span>
           </div>
         </div>
       </div>
     {% endfor %}
   </div>
-</div>
+</section>
 
 <!-- Section 3: Hard-Case Adjudication Matrix (8 Curated Archetypes) -->
-<div class="card" style="padding: 20px 24px;">
-  <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px; margin-bottom: 16px;">
+<section class="card" aria-labelledby="matrix-heading" style="padding: 24px;">
+  <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 14px; margin-bottom: 20px;">
     <div>
-      <h2 style="font-size: 16px; margin: 0 0 2px 0;">
+      <h2 id="matrix-heading" style="font-size: 17px; margin: 0 0 4px 0;">
         Hard-Case Adjudication Matrix (8 Curated Archetypes)
       </h2>
       <p style="margin: 0; color: var(--muted); font-size: 13px;">
-        Head-to-head decision audits across commercial edge cases. Click any debtor row to expand deep causal reasoning &amp; drafted copy previews.
+        Head-to-head decision audits across commercial edge cases. Click any debtor row or press Enter to expand deep causal reasoning &amp; drafted copy previews.
       </p>
     </div>
     <div style="display: flex; gap: 8px;">
-      <button id="btn-expand-all" class="btn" style="font-size: 12px; padding: 6px 12px;">Expand All Details</button>
-      <button id="btn-collapse-all" class="btn" style="font-size: 12px; padding: 6px 12px;">Collapse All</button>
+      <button id="btn-expand-all" class="btn btn-secondary" style="font-size: 12px; padding: 6px 14px;">Expand All Details</button>
+      <button id="btn-collapse-all" class="btn btn-secondary" style="font-size: 12px; padding: 6px 14px;">Collapse All</button>
     </div>
   </div>
 
-  <div style="overflow-x: auto;">
+  <div style="overflow-x: auto; -webkit-overflow-scrolling: touch;" role="region" aria-label="Adjudication Matrix Table" tabindex="0">
     <table class="matrix-table">
       <thead>
         <tr>
-          <th style="width: 28%;">Debtor &amp; Hard-Case Archetype</th>
-          <th style="width: 22%;">Baseline Policy Action</th>
-          <th style="width: 24%;">AI Agent Decision</th>
-          <th style="width: 18%;">Adjudication Verdict</th>
-          <th style="width: 8%; text-align: right;">Drill-down</th>
+          <th scope="col" style="width: 28%;">Debtor &amp; Hard-Case Archetype</th>
+          <th scope="col" style="width: 22%;">Baseline Policy Action</th>
+          <th scope="col" style="width: 24%;">AI Agent Decision</th>
+          <th scope="col" style="width: 18%;">Adjudication Verdict</th>
+          <th scope="col" style="width: 8%; text-align: right;">Drill-down</th>
         </tr>
       </thead>
       <tbody>
@@ -456,11 +539,13 @@
           <td>
             {% if item.verdict and 'Agent Win' in item.verdict %}
               <span class="badge-pill badge-emerald" style="font-size: 11px; font-weight: 600;">
-                &#10003; {{ item.verdict }}
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                {{ item.verdict }}
               </span>
             {% elif item.verdict and ('defer' in item.verdict.lower() or 'human' in item.verdict.lower()) %}
               <span class="badge-pill badge-cyan" style="font-size: 11px; font-weight: 600;">
-                &#8594; {{ item.verdict }}
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+                {{ item.verdict }}
               </span>
             {% else %}
               <span class="badge-pill badge-slate" style="font-size: 11px;">
@@ -469,28 +554,28 @@
             {% endif %}
           </td>
           <td style="text-align: right;">
-            <button class="btn btn-secondary btn-details-toggle toggle-btn-{{ item.debtor_id }}" data-debtor-id="{{ item.debtor_id }}" style="font-size: 11px; padding: 4px 8px;">
-              Details &#9662;
+            <button class="btn btn-secondary btn-details-toggle toggle-btn-{{ item.debtor_id }}" data-debtor-id="{{ item.debtor_id }}" aria-expanded="false" aria-controls="details-row-{{ item.debtor_id }}" aria-label="Toggle details for {{ item.debtor_name }}" style="font-size: 12px; padding: 6px 12px; min-height: 44px; min-width: 44px;">
+              Details
             </button>
           </td>
         </tr>
 
         <!-- Expanded Details Row -->
         <tr id="details-row-{{ item.debtor_id }}" class="matrix-row-details">
-          <td colspan="5" style="padding: 12px 16px; background: #f8fafc;">
+          <td colspan="5" style="padding: 12px 18px; background: var(--bg);">
             <div class="details-box">
               <!-- Left Column: Debtor Profile & Why Baseline Erred -->
               <div>
-                <div style="margin-bottom: 12px;">
-                  <strong style="color: #1e293b; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em;">Debtor Context &amp; Profile</strong>
-                  <p style="margin: 4px 0 0 0; color: #475569; font-size: 13px; line-height: 1.45;">
+                <div style="margin-bottom: 14px;">
+                  <strong style="color: var(--text); font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;">Debtor Context &amp; Profile</strong>
+                  <p style="margin: 6px 0 0 0; color: var(--text-secondary); font-size: 13px; line-height: 1.5;">
                     {{ item.debtor_profile | default(item.rationale) }}
                   </p>
                 </div>
 
-                <div style="padding: 10px 14px; background: #fff1f2; border-left: 3px solid #e11d48; border-radius: 4px;">
-                  <strong style="color: #be123c; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em;">Why Baseline Erred</strong>
-                  <p style="margin: 4px 0 0 0; color: #9f1239; font-size: 12px; line-height: 1.45;">
+                <div class="callout-erred">
+                  <strong>Why Baseline Erred</strong>
+                  <p>
                     {{ item.why_baseline_erred | default("Applied rigid calendar-based escalation blind to account state nuances.") }}
                   </p>
                 </div>
@@ -498,29 +583,30 @@
 
               <!-- Right Column: Why Agent Won & Copy Trigger -->
               <div>
-                <div style="padding: 10px 14px; background: #ecfdf5; border-left: 3px solid #10b981; border-radius: 4px; margin-bottom: 12px;">
-                  <strong style="color: #047857; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em;">Why Agent Won</strong>
-                  <p style="margin: 4px 0 0 0; color: #065f46; font-size: 12px; line-height: 1.45;">
+                <div class="callout-won">
+                  <strong>Why Agent Won</strong>
+                  <p>
                     {{ item.why_agent_won | default(item.rationale) }}
                   </p>
                 </div>
 
                 {% if item.drafted_copy_preview %}
-                <div style="padding: 10px 14px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px;">
+                <div class="draft-box">
                   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                    <span style="font-size: 12px; font-weight: 600; color: #166534;">Drafted Outreach Copy</span>
-                    <span class="badge-pill badge-emerald" style="font-size: 10px;">{{ item.drafted_copy_preview.channel | upper }} &bull; {{ item.drafted_copy_preview.language | upper }}</span>
+                    <span style="font-size: 12px; font-weight: 700; color: var(--accent);">Drafted Outreach Copy</span>
+                    <span class="badge-pill badge-indigo" style="font-size: 10px;">{{ item.drafted_copy_preview.channel | upper }} &bull; {{ item.drafted_copy_preview.language | upper }}</span>
                   </div>
-                  <div style="font-size: 12px; color: #334155; font-weight: 600; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                  <div style="font-size: 12px; color: var(--text); font-weight: 600; margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                     Subject: {{ item.drafted_copy_preview.subject | default('(No Subject - WhatsApp Template)', true) }}
                   </div>
-                  <button class="btn btn-primary" style="font-size: 11px; padding: 5px 12px; background: #15803d; border-color: #166534; color: #ffffff;" onclick="openCopyModal({{ loop.index0 }})">
-                    Open Full Draft Preview &nearr;
+                  <button class="btn btn-primary" style="font-size: 11px; padding: 6px 14px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px;" onclick="openCopyModal({{ loop.index0 }})">
+                    <span>Open Full Draft Preview</span>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="7 7 17 7 17 17"></polyline></svg>
                   </button>
                 </div>
                 {% else %}
-                <div style="padding: 10px 14px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; color: #64748b; font-size: 12px;">
-                  <em>Outbound message suppressed by policy envelope ({% if item.agent_strategy == 'WAIT' %}Zero-Touch WAIT Restraint{% else %}Defers to Human Specialist{% endif %}).</em>
+                <div style="padding: 12px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--muted); font-size: 12px;">
+                  <em>Outbound communication suppressed by policy envelope ({% if item.agent_strategy == 'WAIT' %}Zero-Touch WAIT Restraint{% else %}Defers to Human Credit Specialist{% endif %}).</em>
                 </div>
                 {% endif %}
               </div>
@@ -531,52 +617,59 @@
       </tbody>
     </table>
   </div>
-</div>
+</section>
 
-<!-- Modal: Drafted Copy Preview Modal -->
-<div id="copy-modal" class="modal-overlay" onclick="closeModalOnOutsideClick(event)">
-  <div class="modal-card">
-    <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid #e2e8f0;">
+<!-- Native Dialog: Drafted Copy Preview Modal (modern-web-guidance) -->
+<dialog id="copy-modal" class="modal-dialog" closedby="any" aria-labelledby="modal-debtor-title">
+  <div class="modal-inner">
+    <div class="modal-header">
       <div>
-        <h3 id="modal-debtor-title" style="margin: 0; font-size: 16px; color: #0f172a;">Drafted Communication Copy</h3>
-        <p id="modal-debtor-sub" style="margin: 2px 0 0 0; font-size: 12px; color: #64748b;"></p>
+        <h3 id="modal-debtor-title" style="margin: 0; font-size: 17px; color: var(--text);">Drafted Communication Copy</h3>
+        <p id="modal-debtor-sub" style="margin: 3px 0 0 0; font-size: 12px; color: var(--muted);"></p>
       </div>
-      <button class="btn btn-secondary" style="font-size: 14px; padding: 4px 10px;" onclick="closeCopyModal()">&times;</button>
+      <button class="btn btn-secondary" style="padding: 6px 10px; min-height: 38px; min-width: 38px; display: inline-flex; align-items: center; justify-content: center;" onclick="closeCopyModal()" aria-label="Close dialog">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+      </button>
     </div>
 
-    <div style="padding: 20px;">
+    <div class="modal-body-scroll">
       <!-- Metadata badges -->
       <div id="modal-badges" style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px;"></div>
 
       <!-- Subject Box -->
       <div style="margin-bottom: 14px;">
-        <label style="display: block; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 4px;">Subject Line</label>
-        <div id="modal-subject" style="padding: 10px 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 13px; font-weight: 600; color: #1e293b;"></div>
+        <label style="display: block; font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; margin-bottom: 4px;">Subject Line</label>
+        <div id="modal-subject" style="padding: 10px 14px; background: var(--bg); border: 1.5px solid var(--border); border-radius: var(--radius); font-size: 13px; font-weight: 600; color: var(--text);"></div>
       </div>
 
       <!-- Body Box -->
       <div style="margin-bottom: 16px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-          <label style="font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase;">Message Body Copy</label>
-          <button id="btn-copy-clipboard" class="btn btn-secondary" style="font-size: 11px; padding: 3px 8px;" onclick="copyModalBodyToClipboard()">Copy Copy</button>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <label style="font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; margin: 0;">Message Body Copy</label>
+          <button id="btn-copy-clipboard" class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px; min-height: 28px;" onclick="copyModalBodyToClipboard()">Copy Message</button>
         </div>
-        <pre id="modal-body" style="white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; line-height: 1.5; background: #0f172a; color: #f8fafc; padding: 14px; border-radius: 8px; margin: 0; max-height: 320px; overflow-y: auto;"></pre>
+        <pre id="modal-body" class="pre-draft-body"></pre>
       </div>
 
-      <!-- Compliance indicator. Bound to the drafted message's own dark_pattern_clean flag:
-           a fixed "compliant" string here would assert the very thing the flag exists to
-           measure, including for copy that tripped the filter and had to be rewritten. -->
-      <div id="modal-compliance" style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; padding: 10px 12px; border-radius: 6px;">
-        <span id="modal-compliance-text" style="font-weight: 500;"></span>
+      <!-- Compliance indicator -->
+      <div id="modal-compliance" style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; padding: 12px 16px; border-radius: var(--radius); flex-wrap: gap: 8px;">
+        <span id="modal-compliance-text" style="font-weight: 600; display: inline-flex; align-items: center; gap: 6px;"></span>
         <button class="btn btn-secondary" style="font-size: 12px; padding: 6px 14px;" onclick="closeCopyModal()">Close</button>
       </div>
     </div>
   </div>
-</div>
+</dialog>
 
 <script>
-  // Matrix data for modal previews
   const matrixData = {{ adjudication_matrix | tojson }};
+
+  const chevronDownSvg = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-left:4px; vertical-align:middle;"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+  const chevronUpSvg = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-left:4px; vertical-align:middle;"><polyline points="18 15 12 9 6 15"></polyline></svg>';
+
+  // Initialize button icons
+  document.querySelectorAll("[class*='toggle-btn-']").forEach(btn => {
+    btn.innerHTML = 'Details ' + chevronDownSvg;
+  });
 
   function toggleDetails(debtorId) {
     const detailsRow = document.getElementById("details-row-" + debtorId);
@@ -585,14 +678,20 @@
     
     if (detailsRow.classList.contains("open")) {
       detailsRow.classList.remove("open");
-      if (btn) btn.innerHTML = "Details &#9662;";
+      if (btn) {
+        btn.setAttribute("aria-expanded", "false");
+        btn.innerHTML = 'Details ' + chevronDownSvg;
+      }
     } else {
       detailsRow.classList.add("open");
-      if (btn) btn.innerHTML = "Close &#9652;";
+      if (btn) {
+        btn.setAttribute("aria-expanded", "true");
+        btn.innerHTML = 'Close ' + chevronUpSvg;
+      }
     }
   }
 
-  // Event listeners for matrix table rows and buttons
+  // Row and button listeners with keyboard accessibility
   document.querySelectorAll(".matrix-row-main").forEach(row => {
     row.addEventListener("click", () => {
       const debtorId = row.getAttribute("data-debtor-id");
@@ -610,13 +709,22 @@
 
   document.getElementById("btn-expand-all").addEventListener("click", () => {
     document.querySelectorAll(".matrix-row-details").forEach(row => row.classList.add("open"));
-    document.querySelectorAll("[class*='toggle-btn-']").forEach(btn => btn.innerHTML = "Close &#9652;");
+    document.querySelectorAll("[class*='toggle-btn-']").forEach(btn => {
+      btn.setAttribute("aria-expanded", "true");
+      btn.innerHTML = 'Close ' + chevronUpSvg;
+    });
   });
 
   document.getElementById("btn-collapse-all").addEventListener("click", () => {
     document.querySelectorAll(".matrix-row-details").forEach(row => row.classList.remove("open"));
-    document.querySelectorAll("[class*='toggle-btn-']").forEach(btn => btn.innerHTML = "Details &#9662;");
+    document.querySelectorAll("[class*='toggle-btn-']").forEach(btn => {
+      btn.setAttribute("aria-expanded", "false");
+      btn.innerHTML = 'Details ' + chevronDownSvg;
+    });
   });
+
+  // Native Dialog Controls (modern-web-guidance)
+  const copyModal = document.getElementById("copy-modal");
 
   function openCopyModal(index) {
     const item = matrixData[index];
@@ -662,9 +770,6 @@
     }
     badgesContainer.appendChild(stat);
 
-    // Anti-dark-pattern verdict, read from the draft rather than asserted. `false` means
-    // the first draft tripped a prohibited phrase and was rewritten to fallback copy, which
-    // is a materially different claim from copy that passed on the first pass.
     const isClean = copy.dark_pattern_clean !== false;
     const dp = document.createElement("span");
     dp.className = isClean ? "badge-pill badge-emerald" : "badge-pill badge-rose";
@@ -675,61 +780,84 @@
 
     const compliance = document.getElementById("modal-compliance");
     const complianceText = document.getElementById("modal-compliance-text");
-    compliance.style.background = isClean ? "#f0fdf4" : "#fef2f2";
-    compliance.style.border = isClean ? "1px solid #bbf7d0" : "1px solid #fecaca";
-    complianceText.style.color = isClean ? "#166534" : "#991b1b";
-    complianceText.innerText = isClean
-      ? "✔ Verified anti-dark-pattern compliant • Razorpay link attached"
-      : "⚠ Original draft tripped the anti-dark-pattern filter and was replaced with compliant fallback copy";
+    compliance.style.background = isClean ? "var(--success-light)" : "var(--danger-light)";
+    compliance.style.border = isClean ? "1px solid rgba(34, 197, 94, 0.3)" : "1px solid rgba(239, 68, 68, 0.3)";
+    complianceText.style.color = isClean ? "var(--success)" : "var(--danger)";
+    complianceText.innerHTML = isClean
+      ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg> <span>Verified anti-dark-pattern compliant &bull; Razorpay link attached</span>'
+      : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg> <span>Original draft tripped the anti-dark-pattern filter and was replaced with compliant fallback copy</span>';
 
-    document.getElementById("copy-modal").classList.add("active");
+    if (typeof copyModal.showModal === "function") {
+      copyModal.showModal();
+    } else {
+      copyModal.setAttribute("open", "");
+    }
   }
 
   function closeCopyModal() {
-    document.getElementById("copy-modal").classList.remove("active");
-  }
-
-  function closeModalOnOutsideClick(event) {
-    if (event.target.id === "copy-modal") {
-      closeCopyModal();
+    if (typeof copyModal.close === "function") {
+      copyModal.close();
+    } else {
+      copyModal.removeAttribute("open");
     }
   }
 
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") {
-      closeCopyModal();
-    }
-  });
+  // modern-web-guidance light dismiss fallback for browsers without closedby support
+  if (!('closedBy' in HTMLDialogElement.prototype)) {
+    copyModal.addEventListener("click", (event) => {
+      if (event.target !== copyModal) return;
+      const rect = copyModal.getBoundingClientRect();
+      const isContent = (
+        rect.top <= event.clientY &&
+        event.clientY <= rect.top + rect.height &&
+        rect.left <= event.clientX &&
+        event.clientX <= rect.left + rect.width
+      );
+      if (!isContent) closeCopyModal();
+    });
+  }
 
   function copyModalBodyToClipboard() {
     const text = document.getElementById("modal-body").innerText;
+    const btn = document.getElementById("btn-copy-clipboard");
+    const orig = btn.innerText;
+
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text).then(() => {
-        const btn = document.getElementById("btn-copy-clipboard");
-        const orig = btn.innerText;
-        btn.innerText = "Copied!";
-        setTimeout(() => btn.innerText = orig, 1800);
-      }).catch(err => {
-        alert("Failed to copy to clipboard: " + err);
+        btn.innerText = "Copied to clipboard!";
+        btn.classList.add("btn-primary");
+        setTimeout(() => {
+          btn.innerText = orig;
+          btn.classList.remove("btn-primary");
+        }, 1800);
+      }).catch(() => {
+        fallbackCopy(text, btn, orig);
       });
     } else {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      try {
-        document.execCommand("copy");
-        const btn = document.getElementById("btn-copy-clipboard");
-        const orig = btn.innerText;
-        btn.innerText = "Copied!";
-        setTimeout(() => btn.innerText = orig, 1800);
-      } catch (err) {
-        alert("Failed to copy to clipboard: " + err);
-      } finally {
-        document.body.removeChild(ta);
-      }
+      fallbackCopy(text, btn, orig);
+    }
+  }
+
+  function fallbackCopy(text, btn, orig) {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand("copy");
+      btn.innerText = "Copied to clipboard!";
+      btn.classList.add("btn-primary");
+      setTimeout(() => {
+        btn.innerText = orig;
+        btn.classList.remove("btn-primary");
+      }, 1800);
+    } catch (e) {
+      btn.innerText = "Copy failed";
+      setTimeout(() => btn.innerText = orig, 1800);
+    } finally {
+      document.body.removeChild(ta);
     }
   }
 </script>
