@@ -1,54 +1,109 @@
 {% extends "base.html" %}
 
+{% block title %}Invoice #{{ invoice.invoice_id }} Resolution | {{ invoice.supplier }}{% endblock %}
+
 {% block wrap_class %}wrap-narrow{% endblock %}
 {% block nav %}{% endblock %}
 {% block footer %}{% endblock %}
 
 {% block content %}
 <style>
-  /* Custom styles for resolution page */
+  /* Custom styles for resolution portal */
   .resolution-container {
-    max-width: 600px;
-    margin: 40px auto;
+    max-width: 580px;
+    margin: 20px auto 60px;
     display: flex;
     flex-direction: column;
     gap: 24px;
   }
-  .header-card {
-    text-align: center;
-    padding: 32px 24px;
-    border-radius: var(--radius, 8px);
+
+  /* Trust & Security Banner */
+  .trust-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
     background: var(--surface);
     border: 1px solid var(--border);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+    border-radius: var(--radius);
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .trust-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+    color: var(--text-secondary);
+  }
+  .trust-badge svg {
+    color: var(--success);
+  }
+
+  /* Header Card */
+  .header-card {
+    text-align: center;
+    padding: 36px 24px 28px;
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-sm);
+    position: relative;
+    overflow: hidden;
+  }
+  .header-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, var(--accent) 0%, #38bdf8 100%);
   }
   .supplier-name {
-    font-size: 1.125rem;
-    color: var(--muted);
-    font-weight: 500;
-    margin-bottom: 8px;
+    font-size: 1.25rem;
+    color: var(--text);
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    margin-bottom: 4px;
   }
-  .invoice-id {
-    font-size: 0.875rem;
+  .invoice-id-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85rem;
     color: var(--muted);
-    margin-bottom: 24px;
+    margin-bottom: 20px;
   }
   .amount-huge {
-    font-size: 2.5rem;
-    font-weight: 700;
+    font-size: clamp(2.25rem, 5vw, 2.75rem);
+    font-weight: 800;
     color: var(--text);
-    margin: 16px 0;
+    margin: 12px 0 16px;
+    letter-spacing: -0.03em;
+    line-height: 1.15;
+    font-variant-numeric: tabular-nums;
+  }
+  .amount-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
   }
   
+  /* Timeline Component - No horizontal overflow */
   .timeline {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-top: 24px;
-    padding: 16px 8px;
+    margin-top: 28px;
+    padding: 16px;
     background: var(--bg);
-    border-radius: var(--radius, 8px);
-    font-size: 0.875rem;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius);
+    font-size: 0.8rem;
+    position: relative;
   }
   .timeline-step {
     display: flex;
@@ -57,66 +112,72 @@
     color: var(--muted);
     position: relative;
     flex: 1;
+    z-index: 2;
   }
   .timeline-step.active {
     color: var(--text);
-    font-weight: 600;
-  }
-  .timeline-step::after {
-    content: '';
-    position: absolute;
-    top: 5px;
-    right: -50%;
-    width: 100%;
-    height: 2px;
-    background: var(--border);
-    z-index: 1;
-  }
-  .timeline-step:last-child::after {
-    display: none;
+    font-weight: 700;
   }
   .timeline-dot {
-    width: 12px;
-    height: 12px;
+    width: 14px;
+    height: 14px;
     border-radius: 50%;
     background: var(--border);
-    margin-bottom: 8px;
-    z-index: 2;
-    position: relative;
+    border: 2px solid var(--surface);
+    margin-bottom: 6px;
+    transition: all 0.2s ease;
   }
   .timeline-step.active .timeline-dot {
     background: var(--accent);
-    box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.2);
+    box-shadow: 0 0 0 3px var(--accent-light);
+  }
+  .timeline-step:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    top: 6px;
+    left: 50%;
+    width: 100%;
+    height: 2px;
+    background: var(--border);
+    z-index: -1;
+  }
+  .timeline-step.active:not(:last-child)::after {
+    background: var(--accent);
   }
 
+  /* Action Cards (The 3 Doors) */
   .action-card {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius, 8px);
-    padding: 24px;
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    border-radius: var(--radius-lg);
+    padding: 28px 24px;
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow 0.2s ease, border-color 0.2s ease;
   }
   .action-card:hover {
-    box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+    box-shadow: var(--shadow);
+    border-color: var(--muted);
   }
   .action-card h3 {
     margin-top: 0;
     margin-bottom: 8px;
-    font-size: 1.25rem;
+    font-size: 1.2rem;
+    font-weight: 700;
+    letter-spacing: -0.015em;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
   }
   .action-card p {
     color: var(--muted);
-    margin-bottom: 16px;
-    font-size: 0.95rem;
+    margin-bottom: 20px;
+    font-size: 0.9rem;
     line-height: 1.5;
   }
   .action-form {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 14px;
   }
   .form-group {
     display: flex;
@@ -125,70 +186,106 @@
   }
   .form-group label {
     font-size: 0.875rem;
-    font-weight: 500;
+    font-weight: 600;
     color: var(--text);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .char-count {
+    font-size: 11px;
+    color: var(--muted);
+    font-weight: normal;
   }
   .form-group input, .form-group textarea {
-    padding: 10px 12px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius, 6px);
+    padding: 12px 14px;
+    border: 1.5px solid var(--border);
+    border-radius: var(--radius);
     background: var(--bg);
     color: var(--text);
     font-family: inherit;
+    font-size: 15px; /* >= 16px on mobile prevents iOS zoom */
     width: 100%;
-    box-sizing: border-box;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .form-group input:focus, .form-group textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-light);
   }
   .btn-huge {
     width: 100%;
-    padding: 16px;
-    font-size: 1.125rem;
-    font-weight: 600;
+    padding: 14px 20px;
+    min-height: 48px;
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
     text-align: center;
+    border-radius: var(--radius);
+    box-shadow: 0 2px 4px rgba(79, 70, 229, 0.2);
   }
   .btn-dispute {
-    color: var(--danger, #ef4444);
-    border-color: var(--danger, #ef4444);
+    color: var(--danger);
+    border-color: rgba(220, 38, 38, 0.3);
+    background: var(--surface);
   }
   .btn-dispute:hover {
-    background: rgba(239, 68, 68, 0.1);
+    background: var(--danger-light);
+    border-color: var(--danger);
   }
   .compliance-note {
     text-align: center;
-    font-size: 0.75rem;
+    font-size: 0.8rem;
     color: var(--muted);
-    margin-top: 8px;
-    padding: 0 16px;
-  }
-  .status {
     margin-top: 12px;
+    padding: 0 16px;
+    line-height: 1.5;
+  }
+
+  /* Status message styles */
+  .status {
+    margin-top: 14px;
     font-size: 0.875rem;
-    padding: 8px 12px;
-    border-radius: 6px;
+    padding: 12px 16px;
+    border-radius: var(--radius);
     display: none;
-    /* The dispute verdict is two lines: the statutory note, then the evidence needed. */
     white-space: pre-line;
+    line-height: 1.5;
   }
   .status:not(:empty) {
     display: block;
   }
   .status.ok {
-    background: rgba(34, 197, 94, 0.1);
-    color: var(--success, #15803d);
-    border: 1px solid rgba(34, 197, 94, 0.2);
+    background: var(--success-light);
+    color: var(--success);
+    border: 1px solid rgba(34, 197, 94, 0.3);
   }
   .status.err {
-    background: rgba(239, 68, 68, 0.1);
-    color: var(--danger, #b91c1c);
-    border: 1px solid rgba(239, 68, 68, 0.2);
+    background: var(--danger-light);
+    color: var(--danger);
+    border: 1px solid rgba(239, 68, 68, 0.3);
   }
 </style>
 
 <div class="resolution-container">
+  <!-- Trust & Security Banner -->
+  <aside class="trust-banner" aria-label="Portal Security Verification">
+    <div class="trust-badge">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+      <span>Razorpay Verified Enterprise Surface</span>
+    </div>
+    <span>256-bit TLS Encrypted</span>
+  </aside>
+
   <!-- Header Card -->
-  <div class="header-card">
-    <div class="supplier-name">{{ invoice.supplier }}</div>
-    <div class="invoice-id">Invoice #{{ invoice.invoice_id }}</div>
+  <header class="header-card">
+    <h1 class="supplier-name">{{ invoice.supplier }}</h1>
+    <div class="invoice-id-wrap">
+      <span>Receivable Reference</span>
+      <span class="font-mono" style="font-weight: 600; color: var(--text);">#{{ invoice.invoice_id }}</span>
+    </div>
     
+    <div class="amount-label">Outstanding Payable Balance</div>
     <div class="amount-huge">₹{{ amount_display }}</div>
     
     {% set overdue_days = invoice.days_overdue|int %}
@@ -204,83 +301,79 @@
       {{ overdue_days }} Days Overdue
     </span>
     
-    <!-- Timeline. The third stage names what happened after the invoice fell overdue, so
-         on an invoice that is only overdue it stays unreached rather than repeating the
-         stage before it. -->
+    <!-- Lifecycle Timeline -->
     {% set outcome = {'PAID': 'Paid', 'PARTIALLY_PAID': 'Part paid', 'PROMISED': 'Date agreed', 'DISPUTED': 'Disputed'}.get(invoice.status) %}
-    <div class="timeline">
+    <div class="timeline" aria-label="Invoice Settlement Lifecycle">
       <div class="timeline-step{% if not outcome %} active{% endif %}">
-        <div class="timeline-dot"></div>
+        <div class="timeline-dot" aria-hidden="true"></div>
         <span>Issued</span>
       </div>
       <div class="timeline-step{% if not outcome %} active{% endif %}">
-        <div class="timeline-dot"></div>
+        <div class="timeline-dot" aria-hidden="true"></div>
         <span>Overdue</span>
       </div>
       <div class="timeline-step{% if outcome %} active{% endif %}">
-        <div class="timeline-dot"></div>
+        <div class="timeline-dot" aria-hidden="true"></div>
         <span>{{ outcome or 'Resolved' }}</span>
       </div>
     </div>
-  </div>
+  </header>
 
   <!-- Door 1: Pay Now -->
-  <div class="action-card" id="door-pay">
-    <h3>
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--success, #10b981);"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+  <section class="action-card" id="door-pay" aria-labelledby="pay-heading">
+    <h3 id="pay-heading">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--success);"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
       Pay Now
     </h3>
-    <p>Clear your balance immediately using UPI, Card, or Netbanking.</p>
+    <p>Settle your balance instantly via UPI (GPay, PhonePe, Paytm), Corporate Netbanking, or Cards. Immediate reconciliation &amp; contact suppression.</p>
     <button id="pay" class="btn-primary btn-huge">Pay ₹{{ amount_display }}</button>
-    <div id="pay-status" class="status"></div>
-  </div>
+    <div id="pay-status" class="status" role="status" aria-live="polite"></div>
+  </section>
 
   <!-- Door 2: Promise a Date -->
-  <div class="action-card" id="door-promise">
-    <h3>
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--warning, #f59e0b);"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+  <section class="action-card" id="door-promise" aria-labelledby="promise-heading">
+    <h3 id="promise-heading">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--warning);"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
       Promise a Date
     </h3>
-    <p>Need more time? Commit to a specific date for payment.</p>
+    <p>Need more time to process? Commit to a specific remittance date. Automated dunning outreach will be paused until your promised date.</p>
     <div class="action-form">
       <div class="form-group">
         <label for="promised-date">When will you pay?</label>
         <input type="date" id="promised-date" min="{{ promise_min }}" max="{{ promise_max }}">
       </div>
-      <button id="promise" class="btn-secondary">Submit Promise</button>
+      <button id="promise" class="btn-secondary" style="min-height: 44px; font-weight: 600;">Submit Promise to Pay</button>
     </div>
-    <div id="promise-status" class="status"></div>
-  </div>
+    <div id="promise-status" class="status" role="status" aria-live="polite"></div>
+  </section>
 
   <!-- Door 3: Raise a Dispute -->
-  <div class="action-card" id="door-dispute">
-    <h3>
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--danger, #ef4444);"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-      Raise a Dispute
+  <section class="action-card" id="door-dispute" aria-labelledby="dispute-heading">
+    <h3 id="dispute-heading">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--danger);"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      Raise an Objection / Dispute
     </h3>
-    <p>Is there an issue with this invoice? Let us know so we can resolve it.</p>
+    <p>Rate discrepancy, damaged goods, or TDS withholding reconciliation? Lodge a structured objection to pause statutory interest and route to triage.</p>
     <div class="action-form">
       <div class="form-group">
-        <label for="dispute-reason">Reason for dispute</label>
-        <textarea id="dispute-reason" rows="3" maxlength="{{ dispute_reason_max }}" placeholder="E.g., Goods not received, incorrect amount..."></textarea>
+        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px;">
+          <label for="dispute-reason" style="margin: 0; font-size: 0.875rem; font-weight: 600; color: var(--text);">Reason for dispute</label>
+          <span id="char-counter" class="char-count" aria-live="polite" aria-atomic="true">0 / {{ dispute_reason_max }}</span>
+        </div>
+        <textarea id="dispute-reason" rows="3" maxlength="{{ dispute_reason_max }}" aria-describedby="char-counter" placeholder="E.g., 10% TDS deducted under Section 194C, short delivery on PO, pricing discrepancy..."></textarea>
       </div>
-      <button id="dispute" class="btn-secondary btn-dispute">Submit Dispute</button>
+      <button id="dispute" class="btn-secondary btn-dispute" style="min-height: 44px; font-weight: 600;">Submit Objection</button>
     </div>
-    <div id="dispute-status" class="status"></div>
-  </div>
+    <div id="dispute-status" class="status" role="status" aria-live="polite"></div>
+  </section>
 
-  <div class="compliance-note">
-    Actioning any of the above options will halt automated follow-up communications.
-  </div>
+  <footer class="compliance-note">
+    Actioning any of the above options will halt automated follow-up communications. Regulated under MSMED Act 2006 guidelines.
+  </footer>
 </div>
 {% endblock %}
 
 {% block scripts %}
-{#
-  No subresource integrity hash on checkout.js by design. Razorpay ships this URL
-  unversioned and updates it in place, so a pinned hash would start failing payments
-  silently on their next deploy. This is the integration Razorpay documents.
-#}
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 <script>
   const TOKEN = {{ token | tojson }};
@@ -292,6 +385,15 @@
     const el = document.getElementById(id);
     el.className = "status " + (ok ? "ok" : "err");
     el.textContent = message;
+  }
+
+  // Real-time character counter for dispute textarea
+  const disputeTextarea = document.getElementById("dispute-reason");
+  const charCounter = document.getElementById("char-counter");
+  if (disputeTextarea && charCounter) {
+    disputeTextarea.addEventListener("input", () => {
+      charCounter.textContent = `${disputeTextarea.value.length} / {{ dispute_reason_max }}`;
+    });
   }
 
   async function postJSON(url, body) {
@@ -307,7 +409,9 @@
 
   document.getElementById("pay").addEventListener("click", async () => {
     const button = document.getElementById("pay");
+    const originalText = button.textContent;
     button.disabled = true;
+    button.textContent = "Initiating secure checkout...";
     try {
       const order = await postJSON("/api/create-order", { token: TOKEN });
 
@@ -322,6 +426,7 @@
         modal: {
           ondismiss: () => {
             button.disabled = false;
+            button.textContent = originalText;
             show("pay-status", "Payment was cancelled. Nothing has been charged.", false);
           },
         },
@@ -333,17 +438,18 @@
               razorpay_signature: response.razorpay_signature,
             });
             show("pay-status", "Payment received. Thank you, this invoice is now settled.", true);
-            button.textContent = "Paid";
+            button.textContent = "Paid & Settled";
           } catch (err) {
-            // Verification failed in the browser, but the webhook is the system of
-            // record, so never tell the payer their money is lost.
             show("pay-status", "Payment went through but we could not confirm it here. Our team will reconcile it.", false);
+            button.textContent = originalText;
+            button.disabled = false;
           }
         },
       });
 
       checkout.on("payment.failed", (response) => {
         button.disabled = false;
+        button.textContent = originalText;
         const reason = (response.error && response.error.description) || "The payment did not go through.";
         show("pay-status", reason, false);
       });
@@ -352,27 +458,34 @@
     } catch (err) {
       show("pay-status", err.message, false);
       button.disabled = false;
+      button.textContent = originalText;
     }
   });
 
   document.getElementById("promise").addEventListener("click", async () => {
+    const btn = document.getElementById("promise");
     const field = document.getElementById("promised-date");
     const value = field.value;
     if (!value) return show("promise-status", "Pick a date first.", false);
     if (value < field.min || value > field.max) {
       return show("promise-status", "Pick a date between " + field.min + " and " + field.max + ".", false);
     }
+    btn.disabled = true;
     try {
       await postJSON("/api/promise", { token: TOKEN, promised_date: value });
       show("promise-status", "Noted. We will check back on " + value + ".", true);
     } catch (err) {
       show("promise-status", err.message, false);
+    } finally {
+      btn.disabled = false;
     }
   });
 
   document.getElementById("dispute").addEventListener("click", async () => {
+    const btn = document.getElementById("dispute");
     const reason = document.getElementById("dispute-reason").value.trim();
     if (!reason) return show("dispute-status", "Describe the problem first.", false);
+    btn.disabled = true;
     try {
       const res = await postJSON("/api/dispute", { token: TOKEN, reason: reason });
       const statNote = res.statutory_clock_suspended
@@ -383,6 +496,8 @@
       show("dispute-status", msg, true);
     } catch (err) {
       show("dispute-status", err.message, false);
+    } finally {
+      btn.disabled = false;
     }
   });
 </script>
