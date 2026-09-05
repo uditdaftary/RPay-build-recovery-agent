@@ -70,7 +70,7 @@ DISPUTE_EVIDENCE_MAP: dict[DisputeCategory, str] = {
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="B2B Receivables Recovery Agent")
+app = FastAPI(title="PayUpPal")
 templates = Jinja2Templates(directory=str(PROJECT_ROOT / "app" / "templates"))
 
 def _load_invoices() -> dict[str, dict]:

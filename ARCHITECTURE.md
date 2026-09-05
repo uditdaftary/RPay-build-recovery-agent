@@ -1,4 +1,4 @@
-# B2B Receivables Recovery Agent: Technical Architecture & Systems Design
+# PayUpPal: Technical Architecture & Systems Design
 
 An autonomous, legally grounded, and relationship-aware B2B receivables recovery engine built on Razorpay APIs, India MSMED statutory frameworks, and Gemini LLM reasoning.
 

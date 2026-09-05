@@ -134,6 +134,11 @@
   [data-theme="dark"] .kill-switch-bezel-inner {
     box-shadow: inset 0 1px 1px var(--op-inner-bevel), inset 0 -1px 1px rgba(0, 0, 0, 0.35);
   }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .kill-switch-bezel-inner {
+      box-shadow: inset 0 1px 1px var(--op-inner-bevel), inset 0 -1px 1px rgba(0, 0, 0, 0.35);
+    }
+  }
 
   .kill-switch-layout {
     display: flex;
@@ -589,8 +594,8 @@
       animation: none !important;
     }
     .btn-actuator, .btn-pill-action, .btn-pill-export, .timeline-node {
-      transition: none !important;
-      transform: none !important;
+      transition-duration: 0.01ms !important;
+      animation-duration: 0.01ms !important;
     }
   }
 </style>
@@ -1321,10 +1326,10 @@
           if (row) {
             removeRowWithFocusManagement(row);
           }
-          showToast("Action rejected with reason: " + reason, "success");
+          setTimeout(() => showToast("Action rejected with reason: " + reason, "success"), 50);
         } else {
           const errData = await res.json().catch(() => ({}));
-          showToast("Rejection failed: " + (errData.detail || errData.error || res.statusText), "error");
+          setTimeout(() => showToast("Rejection failed: " + (errData.detail || errData.error || res.statusText), "error"), 50);
         }
       } catch (err) {
         closeRejectDialog();

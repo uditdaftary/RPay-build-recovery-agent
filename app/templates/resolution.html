@@ -37,7 +37,12 @@
                 box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1),
                 border-color 0.25s ease;
   }
-  [data-theme="dark"] .double-bezel-card,
+  [data-theme="dark"] .double-bezel-card {
+    box-shadow: 
+      0 1px 2px rgba(0, 0, 0, 0.5),
+      0 12px 32px -6px rgba(0, 0, 0, 0.7),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) .double-bezel-card {
       box-shadow: 
@@ -63,7 +68,11 @@
       inset 0 1px 0 rgba(255, 255, 255, 0.7);
     gap: 12px;
   }
-  [data-theme="dark"] .trust-banner,
+  [data-theme="dark"] .trust-banner {
+    box-shadow: 
+      0 1px 2px rgba(0, 0, 0, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) .trust-banner {
       box-shadow: 
@@ -114,7 +123,12 @@
     position: relative;
     overflow: hidden;
   }
-  [data-theme="dark"] .header-card,
+  [data-theme="dark"] .header-card {
+    box-shadow: 
+      0 1px 2px rgba(0, 0, 0, 0.5),
+      0 16px 40px -8px rgba(0, 0, 0, 0.75),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) .header-card {
       box-shadow: 
@@ -289,7 +303,12 @@
                 border-color 0.25s ease;
     position: relative;
   }
-  [data-theme="dark"] .action-card,
+  [data-theme="dark"] .action-card {
+    box-shadow: 
+      0 1px 2px rgba(0, 0, 0, 0.4),
+      0 10px 24px -4px rgba(0, 0, 0, 0.65),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) .action-card {
       box-shadow: 
@@ -343,7 +362,11 @@
     color: #059669;
     border: 1px solid rgba(16, 185, 129, 0.25);
   }
-  [data-theme="dark"] .door-icon-emerald,
+  [data-theme="dark"] .door-icon-emerald {
+    background: rgba(16, 185, 129, 0.2);
+    color: #34d399;
+    border-color: rgba(16, 185, 129, 0.4);
+  }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) .door-icon-emerald {
       background: rgba(16, 185, 129, 0.2);
@@ -356,7 +379,11 @@
     color: #d97706;
     border: 1px solid rgba(245, 158, 11, 0.25);
   }
-  [data-theme="dark"] .door-icon-amber,
+  [data-theme="dark"] .door-icon-amber {
+    background: rgba(245, 158, 11, 0.2);
+    color: #fbbf24;
+    border-color: rgba(245, 158, 11, 0.4);
+  }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) .door-icon-amber {
       background: rgba(245, 158, 11, 0.2);
@@ -369,7 +396,11 @@
     color: #dc2626;
     border: 1px solid rgba(239, 68, 68, 0.25);
   }
-  [data-theme="dark"] .door-icon-rose,
+  [data-theme="dark"] .door-icon-rose {
+    background: rgba(239, 68, 68, 0.2);
+    color: #f87171;
+    border-color: rgba(239, 68, 68, 0.4);
+  }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) .door-icon-rose {
       background: rgba(239, 68, 68, 0.2);
@@ -448,7 +479,7 @@
   }
   .form-group input:focus-visible,
   .form-group textarea:focus-visible {
-    outline: none;
+    outline: 2px solid transparent; /* visible in forced-colors/Windows High Contrast Mode */
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--accent-light);
   }
@@ -756,7 +787,7 @@
       <span class="door-tag badge-emerald">Instant Settlement</span>
     </div>
     <p>Settle your balance instantly via UPI (GPay, PhonePe, Paytm), Corporate Netbanking, or Cards. Immediate reconciliation &amp; contact suppression.</p>
-    <button id="pay" class="btn-primary btn-huge">Pay ₹{{ amount_display }}</button>
+    <button id="pay" class="btn-primary btn-huge"><span id="pay-btn-text">Pay ₹{{ amount_display }}</span></button>
     <div id="pay-status" class="status" role="status" aria-live="polite"></div>
   </section>
 
@@ -825,7 +856,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script src="https://checkout.razorpay.com/v1/checkout.js" defer></script>
 <script>
   const TOKEN = {{ token | tojson }};
   const KEY_ID = {{ razorpay_key_id | tojson }};
@@ -860,9 +891,10 @@
 
   document.getElementById("pay").addEventListener("click", async () => {
     const button = document.getElementById("pay");
-    const originalText = button.textContent;
+    const btnTextEl = button.querySelector('#pay-btn-text');
+    const originalText = btnTextEl ? btnTextEl.textContent : button.textContent;
     button.disabled = true;
-    button.textContent = "Initiating secure checkout...";
+    if (btnTextEl) { btnTextEl.textContent = "Initiating secure checkout..."; } else { button.textContent = "Initiating secure checkout..."; }
     try {
       const order = await postJSON("/api/create-order", { token: TOKEN });
 
@@ -877,7 +909,7 @@
         modal: {
           ondismiss: () => {
             button.disabled = false;
-            button.textContent = originalText;
+            if (btnTextEl) { btnTextEl.textContent = originalText; } else { button.textContent = originalText; }
             show("pay-status", "Payment was cancelled. Nothing has been charged.", false);
           },
         },
@@ -889,10 +921,10 @@
               razorpay_signature: response.razorpay_signature,
             });
             show("pay-status", "Payment received. Thank you, this invoice is now settled.", true);
-            button.textContent = "Paid & Settled";
+            if (btnTextEl) { btnTextEl.textContent = "Paid & Settled"; } else { button.textContent = "Paid & Settled"; }
           } catch (err) {
             show("pay-status", "Payment went through but we could not confirm it here. Our team will reconcile it.", false);
-            button.textContent = originalText;
+            if (btnTextEl) { btnTextEl.textContent = originalText; } else { button.textContent = originalText; }
             button.disabled = false;
           }
         },
@@ -900,7 +932,7 @@
 
       checkout.on("payment.failed", (response) => {
         button.disabled = false;
-        button.textContent = originalText;
+        if (btnTextEl) { btnTextEl.textContent = originalText; } else { button.textContent = originalText; }
         const reason = (response.error && response.error.description) || "The payment did not go through.";
         show("pay-status", reason, false);
       });
@@ -909,7 +941,7 @@
     } catch (err) {
       show("pay-status", err.message, false);
       button.disabled = false;
-      button.textContent = originalText;
+      if (btnTextEl) { btnTextEl.textContent = originalText; } else { button.textContent = originalText; }
     }
   });
 

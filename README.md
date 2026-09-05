@@ -1,13 +1,13 @@
-# B2B Receivables Recovery Agent
+# PayUpPal
 
-[![CI / Test Suite](https://img.shields.io/badge/tests-155%20passed-brightgreen.svg)](file:///test_decisions.py)
+[![CI / Test Suite](https://img.shields.io/badge/tests-170%20passed-brightgreen.svg)](file:///test_decisions.py)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688.svg)](https://fastapi.tiangolo.com/)
 [![Razorpay API](https://img.shields.io/badge/Razorpay-REST%20%26%20Webhooks-0C2340.svg)](https://razorpay.com/)
 [![Durable Store](https://img.shields.io/badge/Postgres-ConnectionPool%20%2B%20JSONB-336791.svg)](file:///app/store.py)
 [![Compliance](https://img.shields.io/badge/Compliance-MSMED%20s.15%2F16%20%2B%2043B(h)-navy.svg)](file:///app/statute.py)
 
-An autonomous, legally grounded, and relationship-aware B2B receivables recovery agent built on Razorpay APIs, India statutory frameworks (MSMED Act 2006 & Section 43B(h)), durable PostgreSQL persistence, and Gemini AI reasoning.
+PayUpPal is an autonomous, legally grounded, and relationship-aware B2B receivables recovery agent built on Razorpay APIs, India statutory frameworks (MSMED Act 2006 & Section 43B(h)), durable PostgreSQL persistence, and Gemini AI reasoning.
 
 ---
 
@@ -20,7 +20,7 @@ Indian Micro and Small Enterprises (MSMEs) face severe working-capital stress, w
 4. **Continue chasing after settlement** due to fragmented payment systems without real-time suppression.
 5. **Lose state across serverless invocations** where ephemeral containers forget promises, drop audit trails, or isolate operator kill switches.
 
-The **B2B Receivables Recovery Agent** solves this with a two-stage decision architecture: a hard deterministic policy envelope that guarantees zero-harassment and statutory compliance, paired with an AI strategist that adapts tone, timing, and channels per debtor account, backed by durable multi-tenant persistence.
+**PayUpPal** solves this with a two-stage decision architecture: a hard deterministic policy envelope that guarantees zero-harassment and statutory compliance, paired with an AI strategist that adapts tone, timing, and channels per debtor account, backed by durable multi-tenant persistence.
 
 ---
 
@@ -52,8 +52,13 @@ The **B2B Receivables Recovery Agent** solves this with a two-stage decision arc
   - **Door 3 (Dispute):** Structured objection submission with evidentiary requirements (halts ladder, routes to human triage).
 - **Human Operator Surface & Master Kill Switch (`app/operator.py`, `/operator`):**
   - Real-time Master Kill Switch to instantly halt all automated outbound communications across instances.
-  - Review-First Mode queue for high-stakes decisions (statutory notices, significant concessions) with requeue protection on dispatch failure.
+  - Review-First Mode queue for high-stakes decisions (statutory notices, significant concessions) with requeue protection on dispatch failure. Rendered as the 25 oldest pending rows with the honest total, so the page stays bounded as runs accumulate.
+  - Agent Decision Log rendered directly from the real `decision.made` audit rows (newest first, bounded to 25) — strategy, action class, reasoning, and rejected alternatives, never a fabricated activity feed.
   - Tamper-evident append-only audit trail with JSON and sanitized CSV export (formula injection protected).
+- **Unified Surface Design System (`app/templates/base.html`):**
+  - A single base template owns the palette, light/dark tokens, global nav and footer; the landing, resolution, operator, and results pages inherit them.
+  - The landing page states the thesis, the three architecture differentiators, and the pipeline before any demo invoice, so the argument precedes the demo.
+  - The nav's live demo link resolves per request after store hydration, so it can never point at a settled invoice or a regenerated-away id.
 - **Evaluation & Counterfactual Benchmark (`run_experiment.py`, `/results`):**
   - Deterministic evaluation harness comparing AI Agent vs Calendar Baseline policy across portfolio metrics, strategy distribution, and 8 debtor archetypes.
 
@@ -69,8 +74,8 @@ The **B2B Receivables Recovery Agent** solves this with a two-stage decision arc
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/recovery-agent.git
-cd recovery-agent
+git clone https://github.com/uditdaftary/RPay-build-recovery-agent.git
+cd RPay-build-recovery-agent
 
 # Install dependencies
 pip install -r requirements.txt
@@ -121,8 +126,8 @@ python -m uvicorn app.server:app --reload --port 8000
 ```
 
 Access the application surfaces:
-- **Landing & Demo Portals:** http://localhost:8000/
-- **Debtor Multi-Door Resolution:** http://localhost:8000/r/INV-4008
+- **Landing & Demo Portals:** http://localhost:8000/ — the **Live Debtor Portal** button always resolves to a currently chaseable invoice.
+- **Debtor Multi-Door Resolution:** http://localhost:8000/r/{invoice_id} (e.g. `/r/INV-4008`; use the landing link rather than a pinned id, since the durable store may have settled it)
 - **Human Operator Console:** http://localhost:8000/operator (requires `OPERATOR_API_KEY` header/token)
 - **Counterfactual Benchmark Dashboard:** http://localhost:8000/results
 - **Health Check:** http://localhost:8000/health
@@ -173,7 +178,7 @@ python verify_all.py
 ```
 
 Runs all 5 validation gates:
-1. **Unit Test Suite:** 155+ automated tests covering signature cryptography, statutory calculations, envelope guardrails, durable state, and message generation.
+1. **Unit Test Suite:** 176 automated tests covering signature cryptography, statutory calculations, envelope guardrails, durable state, and message generation (170 run by default; the 6 durable-store checks are skipped unless `STORE_TEST_DATABASE_URL` points at a reachable Postgres).
 2. **Ruff Lint & Formatting:** Strict codebase linting and datetime timezone safety.
 3. **Ledger Determinism:** SHA-256 fingerprint verification against seed 42 (`7c1314468565fc3d`).
 4. **Benchmark Reproducibility:** End-to-end execution of `run_experiment.py`.

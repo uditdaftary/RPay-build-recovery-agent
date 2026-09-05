@@ -297,7 +297,7 @@ class TestExperimentRunner(unittest.TestCase):
 
         # Markdown formatting
         md_out = format_markdown_output(result)
-        self.assertIn("# B2B Receivables Recovery Agent: Evaluation Benchmark", md_out)
+        self.assertIn("# PayUpPal: Evaluation Benchmark", md_out)
         self.assertIn("| Debtor | Case | Baseline Decision | Agent Decision | Verdict |", md_out)
 
         # JSON formatting

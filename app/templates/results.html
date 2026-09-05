@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Evaluation Benchmark and Counterfactual | B2B Recovery Agent{% endblock %}
+{% block title %}Evaluation Benchmark and Counterfactual | PayUpPal{% endblock %}
 {% block nav_results %}active{% endblock %}
 {% block nav_operator_key %}{% if operator_key %}?key={{ operator_key }}{% endif %}{% endblock %}
 {% block head %}
@@ -9,6 +9,22 @@
     grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
     gap: 16px;
     margin-bottom: 24px;
+  }
+  .results-header {
+    margin-bottom: 24px;
+  }
+  .results-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 14px;
+  }
+  .results-header-meta {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
   }
   /* Double-Bezel (Doppelrand) Concentric KPI Cards */
   .stat-card {
@@ -95,9 +111,17 @@
   }
   .strat-name {
     width: 170px;
+    max-width: 170px;
+    min-width: 0;
     font-weight: 600;
     color: var(--text-secondary);
     flex-shrink: 0;
+  }
+  @media (max-width: 480px) {
+    .strat-name {
+      width: 100%;
+      max-width: 100%;
+    }
   }
   .bar-container {
     flex-grow: 1;
@@ -380,8 +404,8 @@
 
 {% block content %}
 <!-- Header & Title -->
-<header style="margin-bottom: 24px;">
-  <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 14px;">
+<header class="results-header">
+  <div class="results-header-row">
     <div>
       <h1 style="font-size: 24px; margin: 0 0 6px 0;">
         Evaluation Benchmark &amp; Counterfactual Analysis
@@ -390,7 +414,7 @@
         Head-to-head empirical evaluation of AI Recovery Strategist vs Static Calendar Baseline Policy across 70 invoices &amp; 20 debtors.
       </p>
     </div>
-    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+    <div class="results-header-meta">
       <span class="chip" style="font-size: 12px;">RNG Seed: <strong>{{ seed }}</strong></span>
       <span class="chip" style="font-size: 12px;">As-Of: <strong>{{ as_of }}</strong></span>
       <span class="badge badge-emerald" style="font-size: 12px;">{% if live_llm %}Live LLM (Gemini){% else %}Deterministic Evaluator (Mock){% endif %}</span>
@@ -546,7 +570,7 @@
     <div style="display: flex; gap: 16px; font-size: 12.5px;">
       <div style="display: flex; align-items: center; gap: 6px;">
         <span style="width: 12px; height: 12px; background: var(--accent); border-radius: 3px; display: inline-block;"></span>
-        <span style="font-weight: 600; color: var(--text-secondary);">AI Recovery Agent</span>
+        <span style="font-weight: 600; color: var(--text-secondary);">AI Agent</span>
       </div>
       <div style="display: flex; align-items: center; gap: 6px;">
         <span style="width: 12px; height: 12px; background: var(--danger); border-radius: 3px; display: inline-block;"></span>
@@ -590,7 +614,7 @@
           <!-- Agent Bar -->
           <div class="bar-row">
             <span class="bar-label">Agent</span>
-            <div class="bar-track" aria-label="Agent {{ strat }}: {{ agent_count }} accounts">
+            <div class="bar-track" aria-label="AI Agent {{ {'WAIT': 'Wait / Restrain', 'RECONCILE': 'Reconcile', 'REQUEST_PAYMENT': 'Request Payment', 'OBTAIN_PROMISE': 'Obtain Promise to Pay', 'RESOLVE_DISPUTE': 'Resolve Dispute', 'ESCALATE': 'Escalate', 'HUMAN_HANDOFF': 'Human Handoff'}.get(strat, strat) }}: {{ agent_count }} of {{ total_evaluated }} accounts ({{ agent_pct }}%)">
               <div class="bar-fill-agent" style="transform: scaleX({{ (agent_pct / 100) if total_evaluated > 0 else 0 }});"></div>
             </div>
             <span class="bar-val">{{ agent_count }} <span style="font-weight: normal; color: var(--muted); font-size: 10.5px;">({{ agent_pct }}%)</span></span>
@@ -599,7 +623,7 @@
           <!-- Baseline Bar -->
           <div class="bar-row">
             <span class="bar-label">Baseline</span>
-            <div class="bar-track" aria-label="Baseline {{ strat }}: {{ baseline_count }} accounts">
+            <div class="bar-track" aria-label="Calendar Baseline {{ {'WAIT': 'Wait / Restrain', 'RECONCILE': 'Reconcile', 'REQUEST_PAYMENT': 'Request Payment', 'OBTAIN_PROMISE': 'Obtain Promise to Pay', 'RESOLVE_DISPUTE': 'Resolve Dispute', 'ESCALATE': 'Escalate', 'HUMAN_HANDOFF': 'Human Handoff'}.get(strat, strat) }}: {{ baseline_count }} of {{ total_evaluated }} accounts ({{ baseline_pct }}%)">
               <div class="bar-fill-baseline" style="transform: scaleX({{ (baseline_pct / 100) if total_evaluated > 0 else 0 }});"></div>
             </div>
             <span class="bar-val">{{ baseline_count }} <span style="font-weight: normal; color: var(--muted); font-size: 10.5px;">({{ baseline_pct }}%)</span></span>
@@ -1031,38 +1055,27 @@
   }
 
   function fallbackCopy(text, btn) {
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.style.position = "fixed";
-    ta.style.opacity = "0";
-    document.body.appendChild(ta);
-    ta.select();
+    // document.execCommand("copy") is deprecated — show a helpful fallback instead
     const textSpan = btn.querySelector(".btn-copy-text");
     const bubbleSpan = btn.querySelector(".btn-bubble");
-    try {
-      document.execCommand("copy");
-      if (textSpan && bubbleSpan) {
-        textSpan.innerText = "Copied to clipboard!";
-        bubbleSpan.innerHTML = checkSvg;
-        setTimeout(() => {
-          textSpan.innerText = "Copy Message";
-          bubbleSpan.innerHTML = copySvg;
-        }, 1800);
-      } else {
-        const orig = btn.innerText;
-        btn.innerText = "Copied to clipboard!";
-        setTimeout(() => { btn.innerText = orig; }, 1800);
-      }
-    } catch (e) {
-      if (textSpan) textSpan.innerText = "Copy failed";
-      else btn.innerText = "Copy failed";
-      setTimeout(() => {
-        if (textSpan) textSpan.innerText = "Copy Message";
-        else btn.innerText = "Copy Message";
-      }, 1800);
-    } finally {
-      document.body.removeChild(ta);
+    const originalText = textSpan ? textSpan.innerText : btn.innerText;
+    // Select the pre element so the user can manually copy
+    const pre = document.getElementById("modal-body");
+    if (pre) {
+      const range = document.createRange();
+      range.selectNodeContents(pre);
+      const sel = window.getSelection();
+      if (sel) { sel.removeAllRanges(); sel.addRange(range); }
     }
+    if (textSpan) {
+      textSpan.innerText = "Select text above to copy";
+    } else {
+      btn.innerText = "Select text above to copy";
+    }
+    setTimeout(() => {
+      if (textSpan) { textSpan.innerText = originalText; if (bubbleSpan) bubbleSpan.innerHTML = copySvg; }
+      else btn.innerText = originalText;
+    }, 2500);
   }
 </script>
 {% endblock %}
