@@ -708,7 +708,7 @@ def format_table_output(result: ExperimentResult) -> str:
     lines: list[str] = []
     width = 125
     lines.append("=" * width)
-    lines.append(f"  B2B RECEIVABLES RECOVERY AGENT -- EVALUATION BENCHMARK (Seed: {result.seed}, As-Of: {result.as_of})")
+    lines.append(f"  PAYUPPAL -- EVALUATION BENCHMARK (Seed: {result.seed}, As-Of: {result.as_of})")
     mode = "Live LLM" if result.is_live_llm else "Deterministic Evaluator (scripted mock, not the live model -- pass --live-llm for real decisions)"
     lines.append(f"  Mode: {mode}")
     lines.append("=" * width)
@@ -758,7 +758,7 @@ def format_markdown_output(result: ExperimentResult) -> str:
     m = result.comparative_metrics
 
     lines: list[str] = [
-        "# B2B Receivables Recovery Agent: Evaluation Benchmark",
+        "# PayUpPal: Evaluation Benchmark",
         f"**Seed:** `{result.seed}` | **As-Of:** `{result.as_of}` | **Mode:** `{'Live LLM' if result.is_live_llm else 'Deterministic Evaluator'}`",
         "",
         "## 1. Portfolio Overview",
