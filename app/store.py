@@ -142,6 +142,22 @@ def append_event(entry: dict[str, Any]) -> None:
         )
 
 
+def read_recent_events(event: str, limit: int) -> list[dict[str, Any]]:
+    """The newest `limit` rows for one event name, oldest first.
+
+    The filter and the bound are pushed into SQL because `read_events` has no LIMIT and
+    the table grows by a row per decision per pipeline run: the operator console was
+    selecting the whole log to render 25 lines of it.
+    """
+    pool = _connect()
+    with pool.connection() as conn:
+        rows = conn.execute(
+            "SELECT payload FROM audit_events WHERE event = %s ORDER BY id DESC LIMIT %s",
+            (event, limit),
+        ).fetchall()
+    return [row[0] for row in reversed(rows)]
+
+
 def read_events() -> list[dict[str, Any]]:
     """Every audit row in insertion order.
 

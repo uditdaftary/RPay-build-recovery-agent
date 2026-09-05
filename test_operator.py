@@ -242,7 +242,7 @@ class TestOperatorSurface(unittest.TestCase):
         )
         res = self.client.get("/operator")
         self.assertEqual(res.status_code, 200)
-        self.assertIn("Review-First Mode", res.text)
+        self.assertIn("Review-first mode", res.text)
         self.assertIn("Kill Switch", res.text)
         # Verify message details & reasoning rendered (BUG-022)
         self.assertIn("Dashboard reasoning test preview", res.text)

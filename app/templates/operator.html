@@ -1,54 +1,80 @@
 {% extends "base.html" %}
+
+{% block nav_operator %}active{% endblock %}
+{% block nav_operator_key %}{% if operator_key %}?key={{ operator_key }}{% endif %}{% endblock %}
+
 {% block content %}
-<style>
-  .wrap { max-width: 1100px !important; padding: 24px 20px 80px; }
-  .nav-link { color: #64748b; text-decoration: none; padding: 6px 12px; border-radius: 6px; font-size: 13px; font-weight: 500; transition: all 0.15s; }
-  .nav-link:hover { color: #0f172a; background: #f1f5f9; }
-  .nav-link.active { color: #4338ca; background: #e0e7ff; font-weight: 600; }
-</style>
 <meta name="operator-key" content="{{ operator_key | default('') }}">
 
-<nav style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 16px; margin-bottom: 24px; border-bottom: 1px solid #e2e8f0;">
-  <div style="display: flex; align-items: center; gap: 12px;">
-    <span style="font-size: 15px; font-weight: 700; color: #0f172a; letter-spacing: -0.01em;">B2B Receivables Recovery</span>
-    <span style="background: #e0e7ff; color: #4338ca; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px;">AI Agent Console</span>
+<div class="header" style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px;">
+  <div>
+    <h1 style="margin: 0; font-size: 24px; color: var(--text);">Operator Console</h1>
+    <p style="margin: 4px 0 0 0; color: var(--muted); font-size: 14px;">
+      High-Stakes Decision Review Queue & Master Kill Switch
+    </p>
   </div>
-  <div style="display: flex; gap: 8px; align-items: center;">
-    <a href="/operator{% if operator_key %}?key={{ operator_key }}{% endif %}" class="nav-link active">Operator Queue</a>
-    <a href="/results" class="nav-link">Results &amp; Benchmark</a>
-    <a href="/r/INV-101" target="_blank" rel="noopener noreferrer" class="nav-link">Demo Token (/r/INV-101) &nearr;</a>
-  </div>
-</nav>
-
-<div class="header" style="margin-bottom: 24px;">
-  <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-    <div>
-      <h1 style="margin: 0; font-size: 24px; color: #0f172a;">Operator Console</h1>
-      <p style="margin: 4px 0 0 0; color: #64748b; font-size: 14px;">
-        High-Stakes Decision Review Queue & Master Kill Switch
-      </p>
-    </div>
-    <div style="display: flex; gap: 8px;">
-      <a href="/api/operator/export?format=json{% if operator_key %}&key={{ operator_key }}{% endif %}" class="btn btn-secondary" download="audit_events.json" style="padding: 8px 12px; font-size: 12px; text-decoration: none; display: inline-block;">Export JSON</a>
-      <a href="/api/operator/export?format=csv{% if operator_key %}&key={{ operator_key }}{% endif %}" class="btn btn-secondary" download="audit_events.csv" style="padding: 8px 12px; font-size: 12px; text-decoration: none; display: inline-block;">Export CSV</a>
-    </div>
+  <div style="display: flex; gap: 8px;">
+    <a href="/api/operator/export?format=json{% if operator_key %}&key={{ operator_key }}{% endif %}" class="btn btn-secondary" download="audit_events.json" style="text-decoration: none;">Export JSON</a>
+    <a href="/api/operator/export?format=csv{% if operator_key %}&key={{ operator_key }}{% endif %}" class="btn btn-secondary" download="audit_events.csv" style="text-decoration: none;">Export CSV</a>
   </div>
 </div>
 
-<div class="card" style="margin-bottom: 24px; border-left: 4px solid {% if kill_switch_active %}#dc2626{% else %}#16a34a{% endif %};">
+<div class="card" style="margin-bottom: 24px;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+    <h2 style="margin: 0; font-size: 16px; color: var(--text);">Agent decision log</h2>
+    <span style="font-size: 12px; color: var(--muted);">
+      {{ decisions | length }} most recent <code>decision.made</code> rows from the append-only audit log
+    </span>
+  </div>
+
+  {% if decisions %}
+  <div style="display: flex; flex-direction: column; gap: 20px; border-left: 2px solid var(--border); margin-left: 8px; padding-left: 24px;">
+    {% for d in decisions %}
+    <div style="position: relative;">
+      <div style="position: absolute; left: -31px; top: 5px; width: 10px; height: 10px; border-radius: 50%; background: {% if d.strategy == 'WAIT' %}var(--muted){% elif d.review_required %}var(--warning){% else %}var(--accent){% endif %}; border: 2px solid var(--surface);"></div>
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 6px;">
+        <div>
+          <strong style="color: var(--text);">{{ d.debtor_name or d.debtor_id }}</strong>
+          <span class="badge {% if d.strategy == 'WAIT' %}badge-slate{% elif d.review_required %}badge-amber{% else %}badge-indigo{% endif %}" style="margin-left: 8px;">{{ d.strategy }}</span>
+          <span class="badge badge-slate" style="margin-left: 4px;">{{ d.action_class }}</span>
+        </div>
+        <span style="font-size: 11px; color: var(--muted); white-space: nowrap;" title="{{ d.ts }}">{{ d.ts[:16] | replace("T", " ") }} UTC</span>
+      </div>
+      <div style="font-size: 13px; color: var(--text); margin-bottom: 6px;">{{ d.reasoning }}</div>
+      {% for r in d.rejected_actions %}
+      <div style="font-size: 12px; color: var(--muted);">Rejected {{ r.strategy }}: {{ r.reason }}</div>
+      {% endfor %}
+      <div style="font-size: 12px; color: var(--muted); margin-top: 6px;">
+        Channel {{ d.channel | upper }} &middot; {{ d.language | upper }} &middot; {{ d.tone }}
+        {% if d.confidence is not none %}&middot; confidence {{ d.confidence }}{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p style="margin: 0; color: var(--muted); font-size: 13px;">
+    No decisions in the audit log yet. Run <code>python run_experiment.py</code> or the pipeline to populate it.
+    {% if audit_log_ephemeral %}
+    This deployment has no <code>DATABASE_URL</code>, so the log is scratch space that does not survive an invocation.
+    {% endif %}
+  </p>
+  {% endif %}
+</div>
+
+<div class="card" style="margin-bottom: 24px; border-left: 4px solid {% if kill_switch_active %}var(--danger){% else %}#10b981{% endif %}; transition: all 0.3s ease; {% if kill_switch_active %}box-shadow: 0 0 15px rgba(239, 68, 68, 0.2); border-color: var(--danger);{% endif %}">
   <div style="display: flex; justify-content: space-between; align-items: center;">
     <div>
-      <h3 style="margin: 0; font-size: 16px; color: #0f172a;">Master Agent Kill Switch</h3>
-      <p style="margin: 4px 0 0 0; color: #64748b; font-size: 13px;">
+      <h3 style="margin: 0; font-size: 16px; color: var(--text);">Master Agent Kill Switch</h3>
+      <p style="margin: 4px 0 0 0; color: var(--muted); font-size: 13px;">
         {% if kill_switch_active %}
-        <strong style="color: #dc2626;">ENGAGED (Halted)</strong> — All automated and queued outbound agent communications are actively blocked.
+        <strong style="color: var(--danger);">ENGAGED (Halted)</strong> &mdash; All automated and queued outbound agent communications are actively blocked.
         {% else %}
-        <strong style="color: #16a34a;">ACTIVE (Running)</strong> — Pipeline is operating normally. Click below to immediately halt all agent actions.
+        <strong style="color: #10b981;">ACTIVE (Running)</strong> &mdash; Pipeline is operating normally. Click below to immediately halt all agent actions.
         {% endif %}
       </p>
     </div>
     <div>
-      <button id="toggle-kill-switch" class="btn {% if kill_switch_active %}btn-primary{% else %}btn-secondary{% endif %}" style="padding: 8px 16px; font-size: 13px; font-weight: 600; background: {% if kill_switch_active %}#16a34a{% else %}#dc2626{% endif %}; color: #ffffff; border: none;">
+      <button id="toggle-kill-switch" class="btn {% if kill_switch_active %}btn-secondary{% else %}btn-danger{% endif %}" style="padding: 10px 20px; font-size: 13px; font-weight: 600;">
         {% if kill_switch_active %}Deactivate Kill Switch (Resume Agents){% else %}Activate Master Kill Switch (Halt Agents){% endif %}
       </button>
     </div>
@@ -56,58 +82,71 @@
 </div>
 
 <div class="card">
-  <h2 style="margin: 0 0 16px 0; font-size: 16px; color: #0f172a;">Review-First Mode: Pending Human Approvals ({{ queue | length }})</h2>
+  {% set queue_total = queue_total | default(queue | length, true) %}
+  <h2 style="margin: 0 0 4px 0; font-size: 16px; color: var(--text);">Review-first mode: pending human approvals ({{ queue_total }})</h2>
+  {% if queue_total > queue | length %}
+  <p style="margin: 0 0 16px 0; color: var(--muted); font-size: 12px;">
+    Showing each debtor's oldest pending action ({{ queue | length }} of {{ queue_total }} items).
+    Approving or rejecting takes the next item for that debtor, so every debtor is actionable from
+    this list; the full queue is served by <a href="/api/operator/queue{% if operator_key %}?key={{ operator_key }}{% endif %}">/api/operator/queue</a>.
+  </p>
+  {% endif %}
   {% if queue %}
   <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
     <thead>
-      <tr style="border-bottom: 2px solid #e2e8f0; text-align: left; color: #64748b;">
-        <th style="padding: 8px;">Debtor</th>
-        <th style="padding: 8px;">Strategy</th>
-        <th style="padding: 8px;">Ask Amount</th>
-        <th style="padding: 8px;">Channel</th>
-        <th style="padding: 8px;">Statutory</th>
-        <th style="padding: 8px; text-align: right;">Actions</th>
+      <tr style="border-bottom: 2px solid var(--border); text-align: left; color: var(--muted);">
+        <th style="padding: 12px 8px;">Debtor</th>
+        <th style="padding: 12px 8px;">Strategy</th>
+        <th style="padding: 12px 8px;">Ask Amount</th>
+        <th style="padding: 12px 8px;">Channel</th>
+        <th style="padding: 12px 8px;">Statutory</th>
+        <th style="padding: 12px 8px; text-align: right;">Actions</th>
       </tr>
     </thead>
     <tbody>
       {% for item in queue %}
-      <tr style="border-bottom: 1px solid #f1f5f9;" id="row-{{ item.debtor_id }}-{{ loop.index }}" class="item-row row-{{ item.debtor_id }}">
-        <td style="padding: 12px 8px;"><strong>{{ item.debtor_name }}</strong><br><span style="color: #94a3b8; font-size: 11px;">{{ item.debtor_id }}</span></td>
-        <td style="padding: 12px 8px;"><span class="badge" style="background: #fef3c7; color: #92400e; padding: 3px 8px; border-radius: 4px;">{{ item.strategy }}</span></td>
-        <td style="padding: 12px 8px;">{{ item.ask_amount_display }}</td>
-        <td style="padding: 12px 8px;">{{ item.channel | upper }} ({{ item.language | upper }})</td>
-        <td style="padding: 12px 8px;">
+      <tr style="border-bottom: 1px solid var(--border); transition: background 0.15s;" id="row-{{ item.debtor_id }}-{{ loop.index }}" class="item-row row-{{ item.debtor_id }}">
+        <td style="padding: 16px 8px;">
+          <strong style="color: var(--text);">{{ item.debtor_name }}</strong><br>
+          <span style="color: var(--muted); font-size: 11px;">{{ item.debtor_id }}</span>
+        </td>
+        <td style="padding: 16px 8px;">
+          <span class="badge badge-amber">{{ item.strategy }}</span>
+        </td>
+        <td style="padding: 16px 8px; color: var(--text);">{{ item.ask_amount_display }}</td>
+        <td style="padding: 16px 8px; color: var(--text);">{{ item.channel | upper }} ({{ item.language | upper }})</td>
+        <td style="padding: 16px 8px;">
           {% if item.is_statutory %}
-          <span style="color: #dc2626; font-weight: 600;">MSMED s.15/16 + 43B(h)</span>
+          <span style="color: var(--danger); font-weight: 600;">MSMED s.15/16 + 43B(h)</span>
           {% else %}
-          <span style="color: #64748b;">Commercial</span>
+          <span style="color: var(--muted);">Commercial</span>
           {% endif %}
         </td>
-        <td style="padding: 12px 8px; text-align: right;">
-          <button class="btn-approve btn btn-primary" data-debtor-id="{{ item.debtor_id }}" style="padding: 6px 12px; font-size: 12px; margin-right: 4px;">Approve & Send</button>
+        <td style="padding: 16px 8px; text-align: right;">
+          <button class="btn-approve btn btn-primary" data-debtor-id="{{ item.debtor_id }}" style="padding: 6px 12px; font-size: 12px; margin-right: 4px;">Approve &amp; Send</button>
           <button class="btn-reject btn btn-secondary" data-debtor-id="{{ item.debtor_id }}" style="padding: 6px 12px; font-size: 12px;">Reject</button>
         </td>
       </tr>
-      <tr id="details-{{ item.debtor_id }}-{{ loop.index }}" class="details-row details-{{ item.debtor_id }}" style="background: #f8fafc; border-bottom: 2px solid #e2e8f0;">
+      <tr id="details-{{ item.debtor_id }}-{{ loop.index }}" class="details-row details-{{ item.debtor_id }}" style="background: var(--bg); border-bottom: 2px solid var(--border);">
         <td colspan="6" style="padding: 12px 16px;">
           <details open style="font-size: 12px;">
-            <summary style="cursor: pointer; font-weight: 600; color: #475569; margin-bottom: 8px;">
-              Message Preview & Strategist Reasoning
+            <summary style="cursor: pointer; font-weight: 600; color: var(--text); margin-bottom: 8px;">
+              Message Preview &amp; Strategist Reasoning
             </summary>
-            <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px; margin-top: 6px;">
+            <div style="background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin-top: 6px;">
               <div style="margin-bottom: 8px;">
-                <strong style="color: #334155;">Reasoning:</strong>
-                <span style="color: #475569;">{{ item.reasoning }}</span>
+                <strong style="color: var(--text);">Reasoning:</strong>
+                <span style="color: var(--muted);">{{ item.reasoning }}</span>
               </div>
               {% if item.subject %}
               <div style="margin-bottom: 8px;">
-                <strong style="color: #334155;">Subject:</strong>
-                <span style="color: #1e293b; font-family: monospace;">{{ item.subject }}</span>
+                <strong style="color: var(--text);">Subject:</strong>
+                <span style="color: var(--text); font-family: monospace;">{{ item.subject }}</span>
               </div>
               {% endif %}
               <div>
-                <strong style="color: #334155;">Draft Body:</strong>
-                <pre style="white-space: pre-wrap; font-family: monospace; font-size: 11px; background: #f1f5f9; padding: 8px; border-radius: 4px; margin: 4px 0 0 0; color: #0f172a;">{{ item.body }}</pre>
+                <strong style="color: var(--text);">Draft Body:</strong>
+                <pre style="white-space: pre-wrap; font-family: monospace; font-size: 11px; background: var(--bg); padding: 8px; border-radius: var(--radius); margin: 4px 0 0 0; color: var(--text); border: 1px solid var(--border);">{{ item.body }}</pre>
               </div>
             </div>
           </details>
@@ -117,7 +156,7 @@
     </tbody>
   </table>
   {% else %}
-  <p style="margin: 0; color: #64748b; font-size: 13px; padding: 16px 0;">No high-stakes actions pending operator review. All clear.</p>
+  <p style="margin: 0; color: var(--muted); font-size: 13px; padding: 16px 0;">No high-stakes actions pending operator review. All clear.</p>
   {% endif %}
 </div>
 

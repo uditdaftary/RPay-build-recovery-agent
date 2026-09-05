@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import tempfile
+from collections import deque
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -151,6 +152,42 @@ def record(event: str, **fields: Any) -> dict[str, Any]:
     finally:
         os.close(handle)
     return entry
+
+
+def read_recent(event: str, limit: int) -> list[dict[str, Any]]:
+    """The newest `limit` rows for one event name, oldest first.
+
+    `read_all` exists for the envelope, which needs every row and must refuse to read a
+    log that has lost data. A display surface needs neither: the operator console shows
+    25 decisions out of a log that grows by one per decision per run, so bounding it at
+    the source keeps the parse proportional to what is rendered. On the database this
+    bounds the read too, since the filter and the LIMIT are pushed into SQL; the file
+    fallback still scans the whole log line by line, but only parses the matching tail.
+
+    Deliberately softer than `read_all` about a corrupt row. This feeds a page, not a
+    decision, and a single bad line taking down the console is a worse outcome than a
+    missing line on it - so an unparseable row is logged and skipped rather than raised.
+    """
+    if _use_database():
+        from app import store
+
+        return store.read_recent_events(event, limit)
+    event_log = get_event_log()
+    if not event_log.exists():
+        return []
+    # `record` writes the event name with json.dumps' default separators, so this is the
+    # exact substring every matching row carries. Pre-filtering on it means only the rows
+    # that will be rendered are ever parsed.
+    marker = f'"event": "{event}"'
+    with event_log.open(encoding="utf-8") as handle:
+        matching = deque((line for line in handle if marker in line), maxlen=limit)
+    rows: list[dict[str, Any]] = []
+    for line in matching:
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError as exc:
+            logger.warning("skipping an unparseable audit row in %s: %s", event_log, exc)
+    return rows
 
 
 def read_all() -> list[dict[str, Any]]:
