@@ -11,10 +11,12 @@ Verifies:
 from __future__ import annotations
 
 import copy
+import json
 import unittest
 from datetime import date, timedelta
 from decimal import Decimal
 
+from app.config import PROJECT_ROOT
 from app.disputes import (
     DisputeCategory,
     classify_dispute_reason,
@@ -337,6 +339,153 @@ class TestStatuteAndDisputes(unittest.TestCase):
         self.assertEqual(classify_dispute_reason("Billed to wrong subsidiary entity"), DisputeCategory.WRONG_RECIPIENT)
         self.assertEqual(classify_dispute_reason("Milestone 3 not yet signed off in SLA contract"), DisputeCategory.CONTRACTUAL)
         self.assertEqual(classify_dispute_reason("Unspecified issue"), DisputeCategory.UNKNOWN)
+
+    def test_dispute_classification_natural_phrasings(self) -> None:
+        """Real debtor phrasings, not the category names, must land in the right bucket.
+
+        The classifier used to match a short exact-phrase list, so "Short delivered: 40
+        units billed, 32 received against the PO." (the live resolution page's own example
+        wording) fell through to UNKNOWN. Word roots fixed that; these lock the coverage.
+        """
+        cases: list[tuple[str, DisputeCategory]] = [
+            # The reported failure, plus the two examples in the resolution page placeholder.
+            ("Short delivered: 40 units billed, 32 received against the PO.", DisputeCategory.GOODS_SERVICES),
+            ("the goods were short delivered", DisputeCategory.GOODS_SERVICES),
+            ("this was already paid by NEFT on 12 August", DisputeCategory.ALREADY_PAID),
+            # GOODS_SERVICES: shortfall / non-delivery / condition / wrong item / service.
+            ("Shortfall of 8 cartons against the challan", DisputeCategory.GOODS_SERVICES),
+            ("Consignment not received, courier shows undelivered", DisputeCategory.GOODS_SERVICES),
+            ("Material is defective and half the batch is broken", DisputeCategory.GOODS_SERVICES),
+            ("You shipped the wrong grade of steel", DisputeCategory.GOODS_SERVICES),
+            ("AMC service was never rendered this quarter", DisputeCategory.GOODS_SERVICES),
+            # INVOICE_MISMATCH: pricing / overbilling / arithmetic.
+            ("You have overcharged us versus the agreed rate", DisputeCategory.INVOICE_MISMATCH),
+            ("Invoice total does not add up, line-item sum is off", DisputeCategory.INVOICE_MISMATCH),
+            ("Billed at a higher price than our PO value", DisputeCategory.INVOICE_MISMATCH),
+            # ALREADY_PAID: instruments and settlement claims.
+            ("Cleared this via RTGS, transaction ref 40021", DisputeCategory.ALREADY_PAID),
+            ("Payment already made by cheque no 004521", DisputeCategory.ALREADY_PAID),
+            ("Nothing is outstanding on our account", DisputeCategory.ALREADY_PAID),
+            # DUPLICATE.
+            ("You have billed us twice for the same delivery", DisputeCategory.DUPLICATE),
+            ("Looks like a duplicated invoice", DisputeCategory.DUPLICATE),
+            # TAX_GST.
+            ("HSN code is wrong so our input tax credit is blocked", DisputeCategory.TAX_GST),
+            ("TDS has not been deducted on this bill", DisputeCategory.TAX_GST),
+            # WRONG_RECIPIENT: entity / GSTIN.
+            ("This is not our company, bill our sister concern instead", DisputeCategory.WRONG_RECIPIENT),
+            ("Raised against the wrong GSTIN", DisputeCategory.WRONG_RECIPIENT),
+            # CONTRACTUAL: terms / timing / sign-off.
+            ("Payment is not due yet, we are on net 45 terms", DisputeCategory.CONTRACTUAL),
+            ("Retention money is held back until the warranty period ends", DisputeCategory.CONTRACTUAL),
+            ("Work is not complete, final phase is pending sign-off", DisputeCategory.CONTRACTUAL),
+            # Genuinely uninformative reasons must stay UNKNOWN so over-widening fails loudly.
+            ("please check this", DisputeCategory.UNKNOWN),
+            ("We have a problem with this bill", DisputeCategory.UNKNOWN),
+            ("Not happy with how this was handled", DisputeCategory.UNKNOWN),
+            # Roots must not leak into unrelated words: "rate" in "corporate", "spec" in
+            # "unspecified" — these read as GOODS_SERVICES / non-delivery, not the shadowed cat.
+            ("Our corporate office never received the shipment", DisputeCategory.GOODS_SERVICES),
+        ]
+        for reason, expected in cases:
+            self.assertEqual(classify_dispute_reason(reason), expected, reason)
+
+    def test_dispute_classification_precedence(self) -> None:
+        """A reason touching two categories resolves to the earlier row in _CATEGORY_PATTERNS."""
+        # Settlement claim outranks a delivery complaint.
+        self.assertEqual(
+            classify_dispute_reason("Already paid via NEFT, and the goods arrived damaged anyway"),
+            DisputeCategory.ALREADY_PAID,
+        )
+        # Wrong-entity claim outranks a pricing complaint.
+        self.assertEqual(
+            classify_dispute_reason("Wrong company on the invoice and the rate is off too"),
+            DisputeCategory.WRONG_RECIPIENT,
+        )
+        # Pricing outranks quantity when both are present.
+        self.assertEqual(
+            classify_dispute_reason("Billed at the wrong rate and short delivered by 5 units"),
+            DisputeCategory.INVOICE_MISMATCH,
+        )
+
+    def test_dispute_classification_regression_lock_seeded_ledger(self) -> None:
+        """The dispute reasons seeded into data/ledger.json must not drift category.
+
+        Read out of the ledger rather than restated here. Restating them locked three
+        strings instead of the file: regenerate the ledger with different reasons and a
+        hardcoded copy still passes, on wording nothing in the system uses any more -
+        the same way a pinned `INV-101` outlived the invoice it named.
+        """
+        ledger = json.loads((PROJECT_ROOT / "data" / "ledger.json").read_text(encoding="utf-8"))
+        seeded = {
+            invoice["dispute_reason"]
+            for invoice in ledger["invoices"]
+            if invoice.get("dispute_reason")
+        }
+        expected = {
+            "We already settled this by NEFT on 12 August, UTR 511923447": DisputeCategory.ALREADY_PAID,
+            "GST rate applied is 18 percent, our contract says 12 percent": DisputeCategory.TAX_GST,
+            "This invoice appears to duplicate INV-3902": DisputeCategory.DUPLICATE,
+        }
+        # Fails loudly when the ledger gains, loses or rewords a reason, so the lock has
+        # to be updated deliberately rather than quietly going stale.
+        self.assertEqual(seeded, set(expected), "the seeded dispute reasons have changed")
+        for reason, category in expected.items():
+            self.assertEqual(classify_dispute_reason(reason), category, reason)
+
+    def test_dispute_classification_no_phrasing_lost_to_roots(self) -> None:
+        """Phrasings the exact-phrase lists matched, which the move to roots dropped.
+
+        Every one of these classified correctly before the rewrite and regressed to
+        UNKNOWN after it - "paid on" worst of all, because it left a debtor asserting
+        settlement on the generic checklist instead of the UTR / bank-statement one.
+        A widening pass is allowed to add categories; it is not allowed to lose them.
+        """
+        cases: list[tuple[str, DisputeCategory]] = [
+            ("Paid on 12 August 2026, please check.", DisputeCategory.ALREADY_PAID),
+            ("paid on", DisputeCategory.ALREADY_PAID),
+            ("Wrong recipient - please redirect this invoice.", DisputeCategory.WRONG_RECIPIENT),
+            ("wrong recipient", DisputeCategory.WRONG_RECIPIENT),
+            ("This belongs to our subsidiary entity, not us.", DisputeCategory.WRONG_RECIPIENT),
+            ("40 units billed, 32 units received against the PO.", DisputeCategory.GOODS_SERVICES),
+            ("units received", DisputeCategory.GOODS_SERVICES),
+            ("The quality was terrible and we are not paying.", DisputeCategory.GOODS_SERVICES),
+            ("quality", DisputeCategory.GOODS_SERVICES),
+        ]
+        for reason, expected in cases:
+            self.assertEqual(classify_dispute_reason(reason), expected, reason)
+
+    def test_a_passing_mention_does_not_outrank_the_actual_claim(self) -> None:
+        """A category above GOODS_SERVICES must match a claim, not a word in passing.
+
+        `\btax` sat third in the table and matched any sentence containing "tax", so an
+        explicit short-delivery complaint was classified TAX_GST and the debtor was asked
+        for a GSTR-2B mismatch certificate instead of an inspection report. `\brate\b`/
+        `\bprice` and `\b2b\b` were the same bug in INVOICE_MISMATCH and TAX_GST: a bare
+        "error rate" or a contract's "clause 2b" outranked the actual complaint below it.
+        """
+        self.assertEqual(
+            classify_dispute_reason(
+                "Goods were short delivered, and the tax on the invoice is also wrong."
+            ),
+            DisputeCategory.GOODS_SERVICES,
+        )
+        # Still a tax dispute when the reason actually makes one.
+        for reason in ("The tax rate applied is wrong", "Excess tax charged on this bill"):
+            self.assertEqual(classify_dispute_reason(reason), DisputeCategory.TAX_GST, reason)
+        self.assertEqual(
+            classify_dispute_reason(
+                "The delay is not our fault, the courier's error rate has been terrible."
+            ),
+            DisputeCategory.UNKNOWN,
+        )
+        self.assertEqual(
+            classify_dispute_reason("As per clause 2b of our agreement, payment is not due yet."),
+            DisputeCategory.CONTRACTUAL,
+        )
+        # Still an invoice-mismatch dispute when the reason actually makes one.
+        for reason in ("Billed at the wrong rate and short delivered by 5 units", "Billed at a higher price than our PO value"):
+            self.assertEqual(classify_dispute_reason(reason), DisputeCategory.INVOICE_MISMATCH, reason)
 
     def test_dispute_recompute_statutory_dates(self) -> None:
         """Test recomputing statutory dates on dispute objection inside 15 days vs outside."""
